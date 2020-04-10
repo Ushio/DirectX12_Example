@@ -1,4 +1,5 @@
 ﻿require 'shellwords'
+require 'fileutils'
 
 # USAGE: dxc.exe [options] <inputs>
 #   -nologo            Suppress copyright message
@@ -16,6 +17,10 @@
 # system("dxc -help")
 
 DebugMode = true
+
+unless File.directory?("bin")
+    FileUtils.mkdir_p("bin")
+end
 
 Dir.glob("kernels/*.hlsl") do |hlsl|
     output = "bin/#{File.basename(hlsl, '.*')}.cso"

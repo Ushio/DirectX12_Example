@@ -163,7 +163,7 @@ void run( DeviceObject* deviceObject )
 
 	imageDownloader->map( [&]( void* p ) {
 		memcpy( image.data(), p, ioImageBytes );
-		image.save( "../image/out.png" );
+		image.save( "out.png" );
 	} );
 
 	// for debugger tools.
