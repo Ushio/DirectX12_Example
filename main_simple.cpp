@@ -26,18 +26,23 @@ void run( DeviceObject* deviceObject )
 
 	std::unique_ptr<BufferObjectUAV> valueBuffer0( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( float ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 	std::unique_ptr<BufferObjectUAV> valueBuffer1( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( float ), D3D12_RESOURCE_STATE_COMMON ) );
+	valueBuffer0->setName(L"valueBuffer0");
+	valueBuffer1->setName(L"valueBuffer1");
 
 	std::unique_ptr<UploaderObject> uploader( new UploaderObject( deviceObject->device(), ioDataBytes ) );
+	uploader->setName(L"uploader");
 	uploader->map( [&]( void* p ) {
 		memcpy( p, input.data(), ioDataBytes );
 	} );
 	std::unique_ptr<DownloaderObject> downloader( new DownloaderObject( deviceObject->device(), ioDataBytes ) );
+	downloader->setName(L"downloader");
 
 	std::unique_ptr<ComputeObject> compute( new ComputeObject() );
 	compute->u( 0 );
 	compute->u( 1 );
 	compute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "simple.cso" ).c_str() );
 	std::shared_ptr<DescriptorHeapObject> heap = compute->createDescriptorHeap( deviceObject->device() );
+	heap->setName(L"heap");
 
 	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 		// upload

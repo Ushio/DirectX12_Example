@@ -273,8 +273,8 @@ private:
 class DeviceObject
 {
 public:
-	DeviceObject(const DeviceObject&) = delete;
-	void operator=(const DeviceObject&) = delete;
+	DeviceObject( const DeviceObject& ) = delete;
+	void operator=( const DeviceObject& ) = delete;
 
 	DeviceObject( IDXGIAdapter* adapter )
 	{
@@ -399,6 +399,10 @@ public:
 	{
 		return _resource.get();
 	}
+	void setName( std::wstring name )
+	{
+		_resource->SetName( name.c_str() );
+	}
 
 private:
 	int64_t _bytes;
@@ -447,6 +451,10 @@ public:
 	ID3D12Resource* resource()
 	{
 		return _resource.get();
+	}
+	void setName( std::wstring name )
+	{
+		_resource->SetName( name.c_str() );
 	}
 
 private:
@@ -516,6 +524,10 @@ public:
 		d.Buffer.CounterOffsetInBytes = 0;
 		return d;
 	}
+	void setName( std::wstring name )
+	{
+		_resource->SetName( name.c_str() );
+	}
 
 private:
 	int64_t _bytes;
@@ -526,8 +538,8 @@ private:
 class ConstantBufferObject
 {
 public:
-	ConstantBufferObject(const ConstantBufferObject&) = delete;
-	void operator=(const ConstantBufferObject&) = delete;
+	ConstantBufferObject( const ConstantBufferObject& ) = delete;
+	void operator=( const ConstantBufferObject& ) = delete;
 
 	ConstantBufferObject( ID3D12Device* device, int64_t bytes, D3D12_RESOURCE_STATES initialState )
 		: _bytes( constantBufferSize( std::max( bytes, 1LL ) ) )
@@ -542,6 +554,7 @@ public:
 			IID_PPV_ARGS( _resource.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
 		_uploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, _bytes ) );
+		_uploader->setName(L"uploader-ConstantBufferObject");
 	}
 	D3D12_RESOURCE_BARRIER resourceBarrierTransition( D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to )
 	{
@@ -565,6 +578,10 @@ public:
 	ID3D12Resource* resource()
 	{
 		return _resource.get();
+	}
+	void setName( std::wstring name )
+	{
+		_resource->SetName( name.c_str() );
 	}
 
 private:
@@ -633,6 +650,10 @@ public:
 	ID3D12DescriptorHeap* bufferHeap()
 	{
 		return _bufferHeap.get();
+	}
+	void setName( std::wstring name )
+	{
+		_bufferHeap->SetName( name.c_str() );
 	}
 
 private:
