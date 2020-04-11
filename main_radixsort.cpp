@@ -11,6 +11,7 @@
 struct CountAndReorderArgument
 {
 	uint32_t numberOfBlock;
+	uint32_t elementsInBlock;
 };
 
 struct ScanGlobalArgument
@@ -34,7 +35,7 @@ void run( DeviceObject* deviceObject )
 	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 	computeCommandList->setName( L"Compute" );
 
-	std::vector<uint32_t> input( 1 + rand() % 10000 );
+	std::vector<uint32_t> input( 100000 );
 	for ( int i = 0; i < input.size(); ++i )
 	{
 		input[i] = rand() & 0xFF;
@@ -132,7 +133,7 @@ void run( DeviceObject* deviceObject )
 		xs0->copyFrom( commandList, uploader.get() );
 		resourceBarrier( commandList, {xs0->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON )} );
 
-		countAndReorderArgument->upload<CountAndReorderArgument>( commandList, {(uint32_t)numberOfBlock} );
+		countAndReorderArgument->upload<CountAndReorderArgument>( commandList, {(uint32_t)numberOfBlock, (uint32_t)ELEMENTS_IN_BLOCK } );
 		resourceBarrier( commandList, {countAndReorderArgument->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON )} );
 
 		// Scan Global Upload

@@ -1,10 +1,12 @@
 #include "helper.hlsl"
 
-#define ELEMENTS_IN_BLOCK 1024
 
+// 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
+// so buckets wants 256 counters
 cbuffer arguments : register(b0, space0)
 {
 	uint numberOfBlock;
+	uint elementsInBlock;
 };
 
 RWStructuredBuffer<uint> xs0 : register(u0);
@@ -24,7 +26,7 @@ void main(uint3 gID : SV_DispatchThreadID)
 
 	/*
 	column major store
-	+------> counters (COUNTERS_IN_BLOCK)
+	+------> counters ( 256 )
 	|(block 0, cnt=0), (block 0, cnt=1)
 	|(block 1, cnt=0), (block 1, cnt=1)
 	|(block 2, cnt=0), (block 2, cnt=1)
@@ -33,8 +35,8 @@ void main(uint3 gID : SV_DispatchThreadID)
 	*/
 	uint n = numberOfElement(xs0);
 	
-	uint valueHead = blockIndex * ELEMENTS_IN_BLOCK;
-	for(int i = 0 ; i < ELEMENTS_IN_BLOCK ; ++i)
+	uint valueHead = blockIndex * elementsInBlock;
+	for(int i = 0 ; i < elementsInBlock ; ++i)
 	{
 		uint valueIndex = valueHead + i;
 		if( n <= valueIndex)
