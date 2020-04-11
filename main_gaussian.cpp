@@ -16,7 +16,8 @@ void run( DeviceObject* deviceObject )
 	Image2DRGBA8 image;
 	image.load( "../image/cat.png" );
 
-	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device() , D3D12_COMMAND_LIST_TYPE_DIRECT, "Compute" ) );
+	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device() , D3D12_COMMAND_LIST_TYPE_DIRECT ) );
+	computeCommandList->setName(L"Compute");
 
 	typedef glm::u8vec4 IOImagePixelType;
 	typedef glm::vec4 WorkingPixelType;

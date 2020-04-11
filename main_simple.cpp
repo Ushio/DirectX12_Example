@@ -1,19 +1,12 @@
 ﻿#include "EzDx.hpp"
 #include "pr.hpp"
 
-struct Arguments
-{
-	int width;
-	int height;
-	int sample_dx;
-	int sample_dy;
-};
-
 void run( DeviceObject* deviceObject )
 {
 	using namespace pr;
 
-	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT, "Compute" ) );
+	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
+	computeCommandList->setName( L"Compute" );
 
 	std::vector<float> input( 1000 );
 	for ( int i = 0; i < input.size(); ++i )
@@ -26,23 +19,21 @@ void run( DeviceObject* deviceObject )
 
 	std::unique_ptr<BufferObjectUAV> valueBuffer0( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( float ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 	std::unique_ptr<BufferObjectUAV> valueBuffer1( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( float ), D3D12_RESOURCE_STATE_COMMON ) );
-	valueBuffer0->setName(L"valueBuffer0");
-	valueBuffer1->setName(L"valueBuffer1");
+	valueBuffer0->setName( L"valueBuffer0" );
+	valueBuffer1->setName( L"valueBuffer1" );
 
 	std::unique_ptr<UploaderObject> uploader( new UploaderObject( deviceObject->device(), ioDataBytes ) );
-	uploader->setName(L"uploader");
+	uploader->setName( L"uploader" );
 	uploader->map( [&]( void* p ) {
 		memcpy( p, input.data(), ioDataBytes );
 	} );
-	std::unique_ptr<DownloaderObject> downloader( new DownloaderObject( deviceObject->device(), ioDataBytes ) );
-	downloader->setName(L"downloader");
 
 	std::unique_ptr<ComputeObject> compute( new ComputeObject() );
 	compute->u( 0 );
 	compute->u( 1 );
 	compute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "simple.cso" ).c_str() );
 	std::shared_ptr<DescriptorHeapObject> heap = compute->createDescriptorHeap( deviceObject->device() );
-	heap->setName(L"heap");
+	heap->setName( L"heap" );
 
 	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 		// upload
@@ -51,39 +42,26 @@ void run( DeviceObject* deviceObject )
 		// upload memory barrier
 		resourceBarrier( commandList, {valueBuffer0->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON )} );
 
-		// Degamma
+		// Execute
 		compute->setPipelineState( commandList );
 		compute->setComputeRootSignature( commandList );
 		compute->assignDescriptorHeap( commandList, heap.get() );
 		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 		heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
 		compute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
-
-		// download
-		resourceBarrier( commandList, {valueBuffer1->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
-		valueBuffer1->copyTo( commandList, downloader.get() );
-		resourceBarrier( commandList, {valueBuffer1->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
 	} );
 
 	deviceObject->queueObject()->execute( computeCommandList.get() );
 
-	// wait for CPU read.
+	std::vector<float> output = valueBuffer1->synchronizedDownload<float>( deviceObject->device(), deviceObject->queueObject() );
 	{
-		std::shared_ptr<FenceObject> fence = deviceObject->queueObject()->fence( deviceObject->device() );
-		fence->wait();
-	}
-
-	downloader->map( [&]( void* p ) {
-		std::vector<float> output( numberOfElement );
-		memcpy( output.data(), p, ioDataBytes );
-
 		FILE* fp = fopen(GetDataPath("output.txt").c_str(), "w");
 		for (int i = 0; i < output.size(); ++i)
 		{
-			fprintf( fp, "%f\n", output[i] );
+			fprintf(fp, "%f\n", output[i]);
 		}
 		fclose(fp);
-	} );
+	}
 
 	// for debugger tools.
 	deviceObject->present();

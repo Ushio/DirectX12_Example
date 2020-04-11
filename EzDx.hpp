@@ -186,7 +186,7 @@ public:
 	CommandObject( const CommandObject& ) = delete;
 	void operator=( const CommandObject& ) = delete;
 
-	CommandObject( ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type, const char* name )
+	CommandObject( ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type )
 	{
 		HRESULT hr;
 		hr = device->CreateCommandAllocator( type, IID_PPV_ARGS( _allocator.getAddressOf() ) );
@@ -226,6 +226,11 @@ public:
 		} );
 		_list->Close();
 		_isClosed = true;
+	}
+
+	void setName( std::wstring name )
+	{
+		_list->SetName( name.c_str() );
 	}
 
 private:
@@ -529,6 +534,38 @@ public:
 		_resource->SetName( name.c_str() );
 	}
 
+	// It's just for debug
+	template <class T>
+	std::vector<T> synchronizedDownload( ID3D12Device* device, QueueObject* queue )
+	{
+		DX_ASSERT(_structureByteStride == sizeof(T), "type T isn't suitable for this UAV");
+		
+		CommandObject command( device, D3D12_COMMAND_LIST_TYPE_DIRECT );
+		DownloaderObject downloader( device, _bytes );
+
+		command.storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
+			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+			commandList->CopyBufferRegion(
+				downloader.resource(), 0,
+				_resource.get(), 0,
+				_bytes );
+			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
+		} );
+		queue->execute(&command);
+
+		int64_t numberOfElement = _bytes / _structureByteStride;
+		std::vector<T> output( numberOfElement );
+
+		std::shared_ptr<FenceObject> fence = queue->fence( device );
+		fence->wait();
+
+		downloader.map([&](void* p) {
+			memcpy(output.data(), p, _bytes);
+		});
+
+		return output;
+	}
+
 private:
 	int64_t _bytes;
 	int64_t _structureByteStride;
@@ -554,7 +591,7 @@ public:
 			IID_PPV_ARGS( _resource.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
 		_uploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, _bytes ) );
-		_uploader->setName(L"uploader-ConstantBufferObject");
+		_uploader->setName( L"uploader-ConstantBufferObject" );
 	}
 	D3D12_RESOURCE_BARRIER resourceBarrierTransition( D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to )
 	{
