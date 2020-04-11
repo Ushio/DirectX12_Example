@@ -311,6 +311,11 @@ public:
 			};
 		_highestShaderModel = sm_to_s[shaderModelFeature.HighestShaderModel];
 
+		D3D12_FEATURE_DATA_D3D12_OPTIONS1 option1 = {};
+		hr = _device->CheckFeatureSupport( D3D12_FEATURE_D3D12_OPTIONS1, &option1, sizeof( option1 ) );
+		DX_ASSERT(hr == S_OK, "");
+		_waveLaneCount = option1.WaveLaneCountMin;
+
 		_queue = std::shared_ptr<QueueObject>( new QueueObject( _device.get(), D3D12_COMMAND_LIST_TYPE_DIRECT, "Compute" ) );
 
 		DxPtr<IDXGIFactory4> pDxgiFactory;
@@ -351,10 +356,14 @@ public:
 	{
 		return _deviceName;
 	}
-
+	int waveLaneCount()
+	{
+		return _waveLaneCount;
+	}
 private:
 	std::wstring _deviceName;
 	std::string _highestShaderModel;
+	int _waveLaneCount = 0;
 	DxPtr<ID3D12Device> _device;
 	std::shared_ptr<QueueObject> _queue;
 	DxPtr<IDXGISwapChain1> _swapchain;
