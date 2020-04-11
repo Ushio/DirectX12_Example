@@ -34,6 +34,5 @@ void main(uint3 gID : SV_DispatchThreadID)
 		int sy = clamp(y + sample_dy * i, 0, height - 1);
 		value += w * src[sy * width + sx];
 	}
-
 	dst[gID.x] = value;
 }

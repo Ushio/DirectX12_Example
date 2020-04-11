@@ -16,8 +16,8 @@ void run( DeviceObject* deviceObject )
 	Image2DRGBA8 image;
 	image.load( "../image/cat.png" );
 
-	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device() , D3D12_COMMAND_LIST_TYPE_DIRECT ) );
-	computeCommandList->setName(L"Compute");
+	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
+	computeCommandList->setName( L"Compute" );
 
 	typedef glm::u8vec4 IOImagePixelType;
 	typedef glm::vec4 WorkingPixelType;
@@ -28,23 +28,23 @@ void run( DeviceObject* deviceObject )
 
 	std::unique_ptr<ConstantBufferObject> arguments_H( new ConstantBufferObject( deviceObject->device(), sizeof( Arguments ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 	std::unique_ptr<ConstantBufferObject> arguments_V( new ConstantBufferObject( deviceObject->device(), sizeof( Arguments ), D3D12_RESOURCE_STATE_COPY_DEST ) );
-	arguments_H->setName(L"arguments_H");
-	arguments_V->setName(L"arguments_V");
+	arguments_H->setName( L"arguments_H" );
+	arguments_V->setName( L"arguments_V" );
 
 	std::unique_ptr<BufferObjectUAV> ioImageBuffer( new BufferObjectUAV( deviceObject->device(), ioImageBytes, sizeof( IOImagePixelType ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 	std::unique_ptr<BufferObjectUAV> valueBuffer0( new BufferObjectUAV( deviceObject->device(), workImageBytes, sizeof( WorkingPixelType ), D3D12_RESOURCE_STATE_COMMON ) );
 	std::unique_ptr<BufferObjectUAV> valueBuffer1( new BufferObjectUAV( deviceObject->device(), workImageBytes, sizeof( WorkingPixelType ), D3D12_RESOURCE_STATE_COMMON ) );
-	ioImageBuffer->setName(L"ioImageBuffer");
-	valueBuffer0->setName(L"valueBuffer0");
-	valueBuffer1->setName(L"valueBuffer1");
+	ioImageBuffer->setName( L"ioImageBuffer" );
+	valueBuffer0->setName( L"valueBuffer0" );
+	valueBuffer1->setName( L"valueBuffer1" );
 
 	std::unique_ptr<UploaderObject> imageUploader( new UploaderObject( deviceObject->device(), ioImageBytes ) );
 	imageUploader->map( [&]( void* p ) {
 		memcpy( p, image.data(), ioImageBytes );
 	} );
 	std::unique_ptr<DownloaderObject> imageDownloader( new DownloaderObject( deviceObject->device(), ioImageBytes ) );
-	imageUploader->setName(L"imageUploader");
-	imageDownloader->setName(L"imageDownloader");
+	imageUploader->setName( L"imageUploader" );
+	imageDownloader->setName( L"imageDownloader" );
 
 	float sigma = 20.0f;
 
@@ -75,12 +75,12 @@ void run( DeviceObject* deviceObject )
 		memcpy( p, kernelstore.data(), sizeof( float ) * kernelstore.size() );
 	} );
 
+	std::unique_ptr<StackDescriptorHeapObject> heap( new StackDescriptorHeapObject( deviceObject->device(), 32 ) );
+
 	std::unique_ptr<ComputeObject> degammaCompute( new ComputeObject() );
 	degammaCompute->u( 0 );
 	degammaCompute->u( 1 );
 	degammaCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "gaussian_degamma.cso" ).c_str() );
-	std::shared_ptr<DescriptorHeapObject> degammaHeap = degammaCompute->createDescriptorHeap( deviceObject->device() );
-	degammaHeap->setName(L"degammaHeap");
 
 	std::unique_ptr<ComputeObject> gaussianCompute( new ComputeObject() );
 	gaussianCompute->u( 0 );
@@ -88,17 +88,11 @@ void run( DeviceObject* deviceObject )
 	gaussianCompute->u( 2 );
 	gaussianCompute->b( 0 );
 	gaussianCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "gaussian.cso" ).c_str() );
-	std::shared_ptr<DescriptorHeapObject> heap_H = gaussianCompute->createDescriptorHeap( deviceObject->device() );
-	std::shared_ptr<DescriptorHeapObject> heap_V = gaussianCompute->createDescriptorHeap( deviceObject->device() );
-	heap_H->setName(L"heap_H");
-	heap_V->setName(L"heap_V");
 
 	std::unique_ptr<ComputeObject> gammaCompute( new ComputeObject() );
 	gammaCompute->u( 0 );
 	gammaCompute->u( 1 );
 	gammaCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "gaussian_gamma.cso" ).c_str() );
-	std::shared_ptr<DescriptorHeapObject> gammaHeap = gammaCompute->createDescriptorHeap( deviceObject->device() );
-	gammaHeap->setName(L"gammaHeap");
 
 	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 		// upload
@@ -118,9 +112,10 @@ void run( DeviceObject* deviceObject )
 		// Degamma
 		degammaCompute->setPipelineState( commandList );
 		degammaCompute->setComputeRootSignature( commandList );
-		degammaCompute->assignDescriptorHeap( commandList, degammaHeap.get() );
-		degammaHeap->u( deviceObject->device(), 0, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
-		degammaHeap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+		heap->startNextHeapAndAssign( commandList, degammaCompute->descriptorEnties() );
+		heap->u( deviceObject->device(), 0, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
+		heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+
 		degammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
 		resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
@@ -130,22 +125,22 @@ void run( DeviceObject* deviceObject )
 		gaussianCompute->setComputeRootSignature( commandList );
 
 		// Horizontal
-		gaussianCompute->assignDescriptorHeap( commandList, heap_H.get() );
-		heap_H->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		heap_H->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
-		heap_H->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
-		heap_H->b( deviceObject->device(), 0, arguments_H->resource() );
+		heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
+		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+		heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
+		heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
+		heap->b( deviceObject->device(), 0, arguments_H->resource() );
 		gaussianCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
 		// Just valueBuffer1 will be modified.
 		resourceBarrier( commandList, {valueBuffer1->resourceBarrierUAV()} );
 
 		// Vertical
-		gaussianCompute->assignDescriptorHeap( commandList, heap_V.get() );
-		heap_V->u( deviceObject->device(), 0, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
-		heap_V->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		heap_V->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
-		heap_V->b( deviceObject->device(), 0, arguments_V->resource() );
+		heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
+		heap->u( deviceObject->device(), 0, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
+		heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+		heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
+		heap->b( deviceObject->device(), 0, arguments_V->resource() );
 		gaussianCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
 		// Just valueBuffer0 will be modified.
@@ -154,9 +149,9 @@ void run( DeviceObject* deviceObject )
 		// Gamma
 		gammaCompute->setPipelineState( commandList );
 		gammaCompute->setComputeRootSignature( commandList );
-		gammaCompute->assignDescriptorHeap( commandList, gammaHeap.get() );
-		gammaHeap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		gammaHeap->u( deviceObject->device(), 1, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
+		heap->startNextHeapAndAssign(commandList, gammaCompute->descriptorEnties());
+		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+		heap->u( deviceObject->device(), 1, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
 		gammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
 		// download

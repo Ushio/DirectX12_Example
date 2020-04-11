@@ -32,8 +32,7 @@ void run( DeviceObject* deviceObject )
 	compute->u( 0 );
 	compute->u( 1 );
 	compute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "simple.cso" ).c_str() );
-	std::shared_ptr<DescriptorHeapObject> heap = compute->createDescriptorHeap( deviceObject->device() );
-	heap->setName( L"heap" );
+	std::shared_ptr<StackDescriptorHeapObject> heap( new StackDescriptorHeapObject( deviceObject->device(), 32 ) );
 
 	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 		// upload
@@ -45,7 +44,7 @@ void run( DeviceObject* deviceObject )
 		// Execute
 		compute->setPipelineState( commandList );
 		compute->setComputeRootSignature( commandList );
-		compute->assignDescriptorHeap( commandList, heap.get() );
+		heap->startNextHeapAndAssign( commandList, compute->descriptorEnties() );
 		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 		heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
 		compute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
@@ -55,12 +54,12 @@ void run( DeviceObject* deviceObject )
 
 	std::vector<float> output = valueBuffer1->synchronizedDownload<float>( deviceObject->device(), deviceObject->queueObject() );
 	{
-		FILE* fp = fopen(GetDataPath("output.txt").c_str(), "w");
-		for (int i = 0; i < output.size(); ++i)
+		FILE* fp = fopen( GetDataPath( "output.txt" ).c_str(), "w" );
+		for ( int i = 0; i < output.size(); ++i )
 		{
-			fprintf(fp, "%f\n", output[i]);
+			fprintf( fp, "%f\n", output[i] );
 		}
-		fclose(fp);
+		fclose( fp );
 	}
 
 	// for debugger tools.

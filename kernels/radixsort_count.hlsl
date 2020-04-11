@@ -1,9 +1,9 @@
 #include "helper.hlsl"
 
-// cbuffer arguments : register(b0, space0)
-// {
-// };
-static const int numberOfBlock = 98;
+cbuffer arguments : register(b0, space0)
+{
+	uint numberOfBlock;
+};
 
 #define ELEMENTS_IN_BLOCK 1024
 
@@ -14,14 +14,14 @@ static const int numberOfBlock = 98;
 RWStructuredBuffer<uint> xs : register(u0);
 RWStructuredBuffer<uint> counter : register(u1);
 
-[numthreads(ELEMENTS_IN_BLOCK, 1, 1)]
-void main(uint3 gID : SV_DispatchThreadID, uint3 group : SV_GroupID)
+[numthreads(512, 1, 1)]
+void main(uint3 gID : SV_DispatchThreadID)
 {
 	if(numberOfElement(xs) <= gID.x)
 	{
 		return;
 	}
-	
+
 	/*
 	column major store
 	+------> counters (COUNTERS_IN_BLOCK)
@@ -32,6 +32,7 @@ void main(uint3 gID : SV_DispatchThreadID, uint3 group : SV_GroupID)
 	blocks ( numberOfBlock )
 	*/
 	uint value = xs[gID.x] & 0xFF;
-	uint store = numberOfBlock * value + group.x;
-	InterlockedAdd(counter[store], 1);
+	uint store = numberOfBlock * value + gID.x / ELEMENTS_IN_BLOCK;
+	uint o;
+	InterlockedAdd(counter[store], 1, o);
 }
