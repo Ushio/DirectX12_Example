@@ -1,23 +1,23 @@
 ﻿#include "EzDx.hpp"
 #include "pr.hpp"
 
-#define BLOCK_SIZE 1024
+#define ELEMENTS_IN_BLOCK 1024
 
 // 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
 // so buckets wants 256 counters
-#define COUNTER_BUCKET_SIZE 256
+#define COUNTER_IN_BLOCK 256
 
 void run( DeviceObject* deviceObject )
 {
 	using namespace pr;
 
 	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
-	computeCommandList->setName(L"Compute");
+	computeCommandList->setName( L"Compute" );
 
-	std::vector<uint32_t> input( 10000 );
+	std::vector<uint32_t> input( 100000 );
 	for ( int i = 0; i < input.size(); ++i )
 	{
-		input[i] = rand();
+		input[i] = rand() & 0xFF;
 	}
 
 	std::unique_ptr<ComputeObject> clearCompute( new ComputeObject() );
@@ -28,9 +28,12 @@ void run( DeviceObject* deviceObject )
 
 	uint64_t numberOfElement = input.size();
 	uint64_t ioDataBytes = sizeof( uint32_t ) * input.size();
-	uint64_t numberOfBlock = dispatchsize(numberOfElement, BLOCK_SIZE);
-	uint64_t blockBytes = sizeof(uint32_t) * numberOfBlock;
-	uint64_t counterBytes = sizeof(uint32_t) * numberOfBlock * COUNTER_BUCKET_SIZE;
+
+	uint64_t numberOfBlock = dispatchsize( numberOfElement, ELEMENTS_IN_BLOCK );
+	uint64_t blockBytes = sizeof( uint32_t ) * numberOfBlock;
+
+	uint64_t numberOfCoutner = numberOfBlock * COUNTER_IN_BLOCK;
+	uint64_t counterBytes = sizeof( uint32_t ) * numberOfCoutner;
 
 	std::unique_ptr<BufferObjectUAV> xs( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( uint32_t ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 	xs->setName( L"xs" );
@@ -58,17 +61,17 @@ void run( DeviceObject* deviceObject )
 		clearCompute->setComputeRootSignature( commandList );
 		clearCompute->assignDescriptorHeap( commandList, clearHeap.get() );
 		clearHeap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
-		clearCompute->dispatch( commandList, dispatchsize( numberOfBlock, 64 ), 1, 1 );
+		clearCompute->dispatch( commandList, dispatchsize( numberOfCoutner, 64 ), 1, 1 );
 
 		resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
 
 		// count
-		countCompute->setPipelineState(commandList);
-		countCompute->setComputeRootSignature(commandList);
-		countCompute->assignDescriptorHeap(commandList, countheap.get());
-		countheap->u(deviceObject->device(), 0, xs->resource(), xs->UAVDescription());
-		countheap->u(deviceObject->device(), 1, counter->resource(), counter->UAVDescription());
-		countCompute->dispatch(commandList, dispatchsize(numberOfElement, BLOCK_SIZE), 1, 1);
+		countCompute->setPipelineState( commandList );
+		countCompute->setComputeRootSignature( commandList );
+		countCompute->assignDescriptorHeap( commandList, countheap.get() );
+		countheap->u( deviceObject->device(), 0, xs->resource(), xs->UAVDescription() );
+		countheap->u( deviceObject->device(), 1, counter->resource(), counter->UAVDescription() );
+		countCompute->dispatch( commandList, dispatchsize( numberOfElement, ELEMENTS_IN_BLOCK ), 1, 1 );
 
 		// upload memory barrier
 		resourceBarrier( commandList, {xs->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON )} );
@@ -76,12 +79,31 @@ void run( DeviceObject* deviceObject )
 
 	deviceObject->queueObject()->execute( computeCommandList.get() );
 
-	//// wait for CPU read.
-	//{
-	//	std::shared_ptr<FenceObject> fence = deviceObject->queueObject()->fence( deviceObject->device() );
-	//	fence->wait();
-	//}
+	std::vector<uint32_t> counterValues = counter->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
+	{
+		for ( int i = 0; i < numberOfElement; i += ELEMENTS_IN_BLOCK )
+		{
+			std::vector<uint32_t> counter( COUNTER_IN_BLOCK );
+			for ( int j = 0; j < ELEMENTS_IN_BLOCK; ++j )
+			{
+				int src = i + j;
+				if ( numberOfElement <= src )
+				{
+					break;
+				}
+				uint32_t index = input[src] & 0xFF;
+				counter[index]++;
+			}
 
+			int blockindex = i / ELEMENTS_IN_BLOCK;
+			int bucketStart = blockindex * COUNTER_IN_BLOCK;
+			for ( int j = 0; j < COUNTER_IN_BLOCK; ++j )
+			{
+				DX_ASSERT( counterValues[bucketStart + j] == counter[j], "" );
+			}
+			printf( "" );
+		}
+	}
 	// for debugger tools.
 	deviceObject->present();
 }

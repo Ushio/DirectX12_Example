@@ -10,6 +10,6 @@ void main(uint3 gID : SV_DispatchThreadID)
 		return;
 	}
 
-	// counter[gID.x] = 0;
-	counter[gID.x] = gID.x;
+	counter[gID.x] = 0;
+	// counter[gID.x] = gID.x;
 }

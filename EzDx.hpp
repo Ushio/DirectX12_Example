@@ -538,8 +538,8 @@ public:
 	template <class T>
 	std::vector<T> synchronizedDownload( ID3D12Device* device, QueueObject* queue )
 	{
-		DX_ASSERT(_structureByteStride == sizeof(T), "type T isn't suitable for this UAV");
-		
+		DX_ASSERT( _structureByteStride == sizeof( T ), "type T isn't suitable for this UAV" );
+
 		CommandObject command( device, D3D12_COMMAND_LIST_TYPE_DIRECT );
 		DownloaderObject downloader( device, _bytes );
 
@@ -551,7 +551,7 @@ public:
 				_bytes );
 			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
 		} );
-		queue->execute(&command);
+		queue->execute( &command );
 
 		int64_t numberOfElement = _bytes / _structureByteStride;
 		std::vector<T> output( numberOfElement );
@@ -559,9 +559,9 @@ public:
 		std::shared_ptr<FenceObject> fence = queue->fence( device );
 		fence->wait();
 
-		downloader.map([&](void* p) {
-			memcpy(output.data(), p, _bytes);
-		});
+		downloader.map( [&]( void* p ) {
+			memcpy( output.data(), p, _bytes );
+		} );
 
 		return output;
 	}
