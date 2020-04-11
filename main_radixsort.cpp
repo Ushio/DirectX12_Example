@@ -5,7 +5,7 @@
 
 // 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
 // so buckets wants 256 counters
-#define COUNTER_IN_BLOCK 256
+#define COUNTERS_IN_BLOCK 256
 
 void run( DeviceObject* deviceObject )
 {
@@ -32,11 +32,21 @@ void run( DeviceObject* deviceObject )
 	uint64_t numberOfBlock = dispatchsize( numberOfElement, ELEMENTS_IN_BLOCK );
 	uint64_t blockBytes = sizeof( uint32_t ) * numberOfBlock;
 
-	uint64_t numberOfCoutner = numberOfBlock * COUNTER_IN_BLOCK;
-	uint64_t counterBytes = sizeof( uint32_t ) * numberOfCoutner;
+	uint64_t numberOfAllCoutner = numberOfBlock * COUNTERS_IN_BLOCK;
+	uint64_t counterBytes = sizeof( uint32_t ) * numberOfAllCoutner;
 
 	std::unique_ptr<BufferObjectUAV> xs( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( uint32_t ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 	xs->setName( L"xs" );
+
+	/*
+	column major store
+	+------> counters (COUNTERS_IN_BLOCK)
+	|(block 0, cnt=0), (block 0, cnt=1)
+	|(block 1, cnt=0), (block 1, cnt=1)
+	|(block 2, cnt=0), (block 2, cnt=1)
+	v
+	blocks ( numberOfBlock )
+	*/
 	std::unique_ptr<BufferObjectUAV> counter( new BufferObjectUAV( deviceObject->device(), counterBytes, sizeof( uint32_t ), D3D12_RESOURCE_STATE_COMMON ) );
 
 	std::unique_ptr<UploaderObject> uploader( new UploaderObject( deviceObject->device(), ioDataBytes ) );
@@ -61,7 +71,7 @@ void run( DeviceObject* deviceObject )
 		clearCompute->setComputeRootSignature( commandList );
 		clearCompute->assignDescriptorHeap( commandList, clearHeap.get() );
 		clearHeap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
-		clearCompute->dispatch( commandList, dispatchsize( numberOfCoutner, 64 ), 1, 1 );
+		clearCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
 
 		resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
 
@@ -83,7 +93,7 @@ void run( DeviceObject* deviceObject )
 	{
 		for ( int i = 0; i < numberOfElement; i += ELEMENTS_IN_BLOCK )
 		{
-			std::vector<uint32_t> counter( COUNTER_IN_BLOCK );
+			std::vector<uint32_t> counter( COUNTERS_IN_BLOCK );
 			for ( int j = 0; j < ELEMENTS_IN_BLOCK; ++j )
 			{
 				int src = i + j;
@@ -96,10 +106,9 @@ void run( DeviceObject* deviceObject )
 			}
 
 			int blockindex = i / ELEMENTS_IN_BLOCK;
-			int bucketStart = blockindex * COUNTER_IN_BLOCK;
-			for ( int j = 0; j < COUNTER_IN_BLOCK; ++j )
+			for ( int j = 0; j < COUNTERS_IN_BLOCK; ++j )
 			{
-				DX_ASSERT( counterValues[bucketStart + j] == counter[j], "" );
+				DX_ASSERT( counterValues[numberOfBlock * j + blockindex] == counter[j], "" );
 			}
 			printf( "" );
 		}
