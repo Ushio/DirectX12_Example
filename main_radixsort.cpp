@@ -47,10 +47,6 @@ void run( DeviceObject* deviceObject )
 
 	std::shared_ptr<StackDescriptorHeapObject> heap( new StackDescriptorHeapObject( deviceObject->device(), 512 ) );
 
-	std::unique_ptr<ComputeObject> clearCompute( new ComputeObject() );
-	clearCompute->u( 0 );
-	clearCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "radixsort_clear.cso" ).c_str() );
-
 	uint64_t numberOfElement = input.size();
 	uint64_t ioDataBytes = sizeof( uint32_t ) * input.size();
 
@@ -162,14 +158,6 @@ void run( DeviceObject* deviceObject )
 		for ( int i = 0; i < RADIX_NUMBER_OF_ITERATION; ++i )
 		{
 			// clear
-			clearCompute->setPipelineState( commandList );
-			clearCompute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, clearCompute->descriptorEnties() );
-			heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
-			clearCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
-
-			resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
-
 			stumper->stampBeg( commandList, "Count" );
 
 			// count
