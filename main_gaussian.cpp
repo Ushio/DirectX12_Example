@@ -94,7 +94,11 @@ void run( DeviceObject* deviceObject )
 	gammaCompute->u( 1 );
 	gammaCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "gaussian_gamma.cso" ).c_str() );
 
+	std::unique_ptr<TimestampObject> stumper( new TimestampObject( deviceObject->device(), 128 ) );
+
 	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
+		stumper->stamp( commandList, "upload" );
+
 		// upload
 		arguments_H->upload<Arguments>( commandList, {image.width(), image.height(), 1, 0} );
 		arguments_V->upload<Arguments>( commandList, {image.width(), image.height(), 0, 1} );
@@ -109,6 +113,8 @@ void run( DeviceObject* deviceObject )
 										  ioImageBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ),
 									  } );
 
+		stumper->stamp( commandList, "degamma" );
+
 		// Degamma
 		degammaCompute->setPipelineState( commandList );
 		degammaCompute->setComputeRootSignature( commandList );
@@ -119,6 +125,8 @@ void run( DeviceObject* deviceObject )
 		degammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
 		resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
+
+		stumper->stamp( commandList, "gaussian H" );
 
 		// Gaussian Pipeline
 		gaussianCompute->setPipelineState( commandList );
@@ -135,6 +143,8 @@ void run( DeviceObject* deviceObject )
 		// Just valueBuffer1 will be modified.
 		resourceBarrier( commandList, {valueBuffer1->resourceBarrierUAV()} );
 
+		stumper->stamp( commandList, "gaussian V" );
+
 		// Vertical
 		heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
 		heap->u( deviceObject->device(), 0, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
@@ -146,18 +156,26 @@ void run( DeviceObject* deviceObject )
 		// Just valueBuffer0 will be modified.
 		resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
 
+		stumper->stamp( commandList, "gamma" );
+
 		// Gamma
 		gammaCompute->setPipelineState( commandList );
 		gammaCompute->setComputeRootSignature( commandList );
-		heap->startNextHeapAndAssign(commandList, gammaCompute->descriptorEnties());
+		heap->startNextHeapAndAssign( commandList, gammaCompute->descriptorEnties() );
 		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 		heap->u( deviceObject->device(), 1, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
 		gammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
-		// download
 		resourceBarrier( commandList, {ioImageBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+
+		stumper->stamp( commandList, "download" );
+
+		// download
 		ioImageBuffer->copyTo( commandList, imageDownloader.get() );
 		resourceBarrier( commandList, {ioImageBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
+
+		stumper->stamp( commandList, "end" );
+		stumper->resolve( commandList );
 	} );
 
 	deviceObject->queueObject()->execute( computeCommandList.get() );
@@ -168,7 +186,12 @@ void run( DeviceObject* deviceObject )
 		fence->wait();
 	}
 
-	imageDownloader->map( [&]( void* p ) {
+	auto stumpdata = stumper->download( deviceObject->queueObject()->queue() );
+	for ( auto s : stumpdata )
+	{
+		printf( "%s -- %.4f ms\n", s.label.c_str(), s.durationMS );
+	}
+	imageDownloader->map( [&]( const void* p ) {
 		memcpy( image.data(), p, ioImageBytes );
 		image.save( "out.png" );
 	} );

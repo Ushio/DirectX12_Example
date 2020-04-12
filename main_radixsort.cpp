@@ -38,7 +38,7 @@ void run( DeviceObject* deviceObject )
 	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 	computeCommandList->setName( L"Compute" );
 
-	std::vector<uint32_t> input(10000);
+	std::vector<uint32_t> input( 1000000 );
 	for ( int i = 0; i < input.size(); ++i )
 	{
 		input[i] = rand();
@@ -136,6 +136,8 @@ void run( DeviceObject* deviceObject )
 	reorderCompute->b( 0 );
 	reorderCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "radixsort_reorder.cso" ).c_str() );
 
+	std::unique_ptr<TimestampObject> stumper( new TimestampObject( deviceObject->device(), 128 ) );
+
 	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 		// upload
 		std::vector<D3D12_RESOURCE_BARRIER> uploadBarriers;
@@ -161,83 +163,104 @@ void run( DeviceObject* deviceObject )
 		}
 		resourceBarrier( commandList, uploadBarriers );
 
-		for (int i = 0; i < RADIX_NUMBER_OF_ITERATION; ++i)
+		for ( int i = 0; i < RADIX_NUMBER_OF_ITERATION; ++i )
 		{
 			// clear
-			clearCompute->setPipelineState(commandList);
-			clearCompute->setComputeRootSignature(commandList);
-			heap->startNextHeapAndAssign(commandList, clearCompute->descriptorEnties());
-			heap->u(deviceObject->device(), 0, counter->resource(), counter->UAVDescription());
-			heap->u(deviceObject->device(), 1, offsetCounter->resource(), offsetCounter->UAVDescription());
-			clearCompute->dispatch(commandList, dispatchsize(numberOfAllCoutner, 64), 1, 1);
+			clearCompute->setPipelineState( commandList );
+			clearCompute->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, clearCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
+			heap->u( deviceObject->device(), 1, offsetCounter->resource(), offsetCounter->UAVDescription() );
+			clearCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
 
-			resourceBarrier(commandList, { counter->resourceBarrierUAV(), offsetCounter->resourceBarrierUAV() });
+			resourceBarrier( commandList, {counter->resourceBarrierUAV(), offsetCounter->resourceBarrierUAV()} );
 
+			stumper->stampBeg( commandList, "Count" );
 
 			// count
-			countCompute->setPipelineState(commandList);
-			countCompute->setComputeRootSignature(commandList);
-			heap->startNextHeapAndAssign(commandList, countCompute->descriptorEnties());
-			heap->u(deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription());
-			heap->u(deviceObject->device(), 1, counter->resource(), counter->UAVDescription());
-			heap->b(deviceObject->device(), 0, countAndReorderArguments[i]->resource());
-			countCompute->dispatch(commandList, dispatchsize(numberOfElement, 512), 1, 1);
+			countCompute->setPipelineState( commandList );
+			countCompute->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, countCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
+			heap->u( deviceObject->device(), 1, counter->resource(), counter->UAVDescription() );
+			heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
+			countCompute->dispatch( commandList, dispatchsize( numberOfElement, 512 ), 1, 1 );
 
-			resourceBarrier(commandList, { counter->resourceBarrierUAV() });
+			resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
+
+			stumper->stampEnd( commandList );
+			stumper->stampBeg( commandList, "Scan" );
 
 			// Scan Prepare
-			scanPrepareCompute->setPipelineState(commandList);
-			scanPrepareCompute->setComputeRootSignature(commandList);
-			heap->startNextHeapAndAssign(commandList, scanPrepareCompute->descriptorEnties());
-			heap->u(deviceObject->device(), 0, counter->resource(), counter->UAVDescription());
-			heap->u(deviceObject->device(), 1, globalScanTable0->resource(), globalScanTable0->UAVDescription());
-			scanPrepareCompute->dispatch(commandList, dispatchsize(numberOfAllCoutner, 128), 1, 1);
+			scanPrepareCompute->setPipelineState( commandList );
+			scanPrepareCompute->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, scanPrepareCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
+			heap->u( deviceObject->device(), 1, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+			scanPrepareCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 128 ), 1, 1 );
 
-			resourceBarrier(commandList, { globalScanTable0->resourceBarrierUAV() });
+			resourceBarrier( commandList, {globalScanTable0->resourceBarrierUAV()} );
 
 			// globalScanTable0 is a always latest one.
-			for (int j = 0; j < globalScanIteration; ++j)
+			for ( int j = 0; j < globalScanIteration; ++j )
 			{
-				scanglobalCompute->setPipelineState(commandList);
-				scanglobalCompute->setComputeRootSignature(commandList);
-				heap->startNextHeapAndAssign(commandList, scanglobalCompute->descriptorEnties());
-				heap->b(deviceObject->device(), 0, scanglobalConstants[j]->resource());
-				heap->u(deviceObject->device(), 0, globalScanTable0->resource(), globalScanTable0->UAVDescription());
-				heap->u(deviceObject->device(), 1, globalScanTable1->resource(), globalScanTable1->UAVDescription());
+				scanglobalCompute->setPipelineState( commandList );
+				scanglobalCompute->setComputeRootSignature( commandList );
+				heap->startNextHeapAndAssign( commandList, scanglobalCompute->descriptorEnties() );
+				heap->b( deviceObject->device(), 0, scanglobalConstants[j]->resource() );
+				heap->u( deviceObject->device(), 0, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+				heap->u( deviceObject->device(), 1, globalScanTable1->resource(), globalScanTable1->UAVDescription() );
 
-				scanglobalCompute->dispatch(commandList, dispatchsize(numberOfAllCoutner, 64), 1, 1);
+				scanglobalCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
 
-				std::swap(globalScanTable0, globalScanTable1);
-				resourceBarrier(commandList, { globalScanTable0->resourceBarrierUAV() });
+				std::swap( globalScanTable0, globalScanTable1 );
+				resourceBarrier( commandList, {globalScanTable0->resourceBarrierUAV()} );
 			}
 
-			
+			stumper->stampEnd( commandList );
+			stumper->stampBeg( commandList, "Reorder" );
 
 			// Reorder
-			reorderCompute->setPipelineState(commandList);
-			reorderCompute->setComputeRootSignature(commandList);
-			heap->startNextHeapAndAssign(commandList, reorderCompute->descriptorEnties());
-			heap->u(deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription());
-			heap->u(deviceObject->device(), 1, xs1->resource(), xs1->UAVDescription());
-			heap->u(deviceObject->device(), 2, offsetCounter->resource(), offsetCounter->UAVDescription());
-			heap->u(deviceObject->device(), 3, globalScanTable0->resource(), globalScanTable0->UAVDescription());
-			heap->b(deviceObject->device(), 0, countAndReorderArguments[i]->resource());
-			reorderCompute->dispatch(commandList, dispatchsize(numberOfBlock, 64), 1, 1);
+			reorderCompute->setPipelineState( commandList );
+			reorderCompute->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, reorderCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
+			heap->u( deviceObject->device(), 1, xs1->resource(), xs1->UAVDescription() );
+			heap->u( deviceObject->device(), 2, offsetCounter->resource(), offsetCounter->UAVDescription() );
+			heap->u( deviceObject->device(), 3, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+			heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
+			reorderCompute->dispatch( commandList, dispatchsize( numberOfBlock, 64 ), 1, 1 );
 
-			std::swap(xs0, xs1);
+			std::swap( xs0, xs1 );
 
-			resourceBarrier(commandList, { xs0->resourceBarrierUAV(), offsetCounter->resourceBarrierUAV() });
+			resourceBarrier( commandList, {xs0->resourceBarrierUAV(), offsetCounter->resourceBarrierUAV()} );
+
+			stumper->stampEnd( commandList );
 		}
+
+		stumper->resolve( commandList );
 	} );
 
 	deviceObject->queueObject()->execute( computeCommandList.get() );
+
+	// wait for CPU read.
+	{
+		std::shared_ptr<FenceObject> fence = deviceObject->queueObject()->fence( deviceObject->device() );
+		fence->wait();
+	}
+
+	auto stumpdata = stumper->download( deviceObject->queueObject()->queue() );
+	for ( auto s : stumpdata )
+	{
+		printf( "%s -- %.4f ms\n", s.label.c_str(), s.durationMS );
+	}
 
 	std::vector<uint32_t> counterValues = counter->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 	std::vector<uint32_t> globalScanTableValues = globalScanTable0->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 	std::vector<uint32_t> sortedValues = xs0->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 	std::vector<uint32_t> offsetCounterValue = offsetCounter->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 
-	// this check is RADIX_NUMBER_OF_ITERATION == 1 only 
+	// this check is RADIX_NUMBER_OF_ITERATION == 1 only
 	//// Check Counter
 	//{
 	//	for ( int i = 0; i < numberOfElement; i += ELEMENTS_IN_BLOCK )
@@ -274,11 +297,11 @@ void run( DeviceObject* deviceObject )
 
 	// Check Sort
 	{
-		std::sort(input.begin(), input.end());
+		std::sort( input.begin(), input.end() );
 
 		for ( int i = 0; i < sortedValues.size(); ++i )
 		{
-			DX_ASSERT(sortedValues[i] == input[i], "" );
+			DX_ASSERT( sortedValues[i] == input[i], "" );
 		}
 	}
 
@@ -319,6 +342,7 @@ int main()
 		for ( auto d : devices )
 		{
 			printf( "run : %s\n", wstring_to_string( d->deviceName() ).c_str() );
+			d->device()->SetStablePowerState( true );
 			run( d.get() );
 		}
 	}

@@ -450,7 +450,7 @@ public:
 	~DownloaderObject()
 	{
 	}
-	void map( std::function<void( void* p )> f )
+	void map( std::function<void( const void* p )> f )
 	{
 		D3D12_RANGE readrange = {0, _bytes};
 		D3D12_RANGE writerange = {};
@@ -574,7 +574,7 @@ public:
 		std::shared_ptr<FenceObject> fence = queue->fence( device );
 		fence->wait();
 
-		downloader.map( [&]( void* p ) {
+		downloader.map( [&]( const void* p ) {
 			memcpy( output.data(), p, _bytes );
 		} );
 
@@ -873,4 +873,120 @@ private:
 
 	DxPtr<ID3D12RootSignature> _signature;
 	DxPtr<ID3D12PipelineState> _pipelineState;
+};
+
+struct TimestampSpan
+{
+	std::string label;
+	double durationS = 0;  // Seconds
+	double durationMS = 0; // MilliSeconds
+	double durationUS = 0; // MicroSeconds
+};
+class TimestampObject
+{
+public:
+	TimestampObject( ID3D12Device* device, int capacity )
+		: _queryCapacity( capacity )
+	{
+		D3D12_QUERY_HEAP_DESC desc = {};
+		desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+		desc.Count = _queryCapacity;
+		device->CreateQueryHeap( &desc, IID_PPV_ARGS( _qHeap.getAddressOf() ) );
+
+		_downloader = std::unique_ptr<DownloaderObject>( new DownloaderObject( device, sizeof( uint64_t ) * _queryCapacity ) );
+	}
+
+	void stamp( ID3D12GraphicsCommandList* command, const char* label = nullptr )
+	{
+		DX_ASSERT( _queryHeadIndex < _queryCapacity, "capacity overflow" );
+		command->EndQuery( _qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++ );
+
+		if ( label )
+		{
+			_labels.push_back( label );
+		}
+		else
+		{
+			char buffer[64];
+			sprintf( buffer, "index [%d]", _queryHeadIndex - 1 );
+			_labels.push_back( buffer );
+		}
+
+		_ignoreNextLabel.push_back(0);
+	}
+	void stampBeg(ID3D12GraphicsCommandList* command, const char* label)
+	{
+		DX_ASSERT(_queryHeadIndex < _queryCapacity, "capacity overflow");
+		command->EndQuery(_qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++);
+
+		_labels.push_back(label);
+		_ignoreNextLabel.push_back(0);
+	}
+	void stampEnd(ID3D12GraphicsCommandList* command)
+	{
+		DX_ASSERT(_queryHeadIndex < _queryCapacity, "capacity overflow");
+		command->EndQuery(_qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++);
+
+		_labels.push_back("");
+		_ignoreNextLabel.push_back(1);
+	}
+
+	void clear()
+	{
+		_queryHeadIndex = 0;
+		_labels.clear();
+	}
+	void resolve( ID3D12GraphicsCommandList* command )
+	{
+		command->ResolveQueryData( _qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, _queryHeadIndex, _downloader->resource(), 0 );
+	}
+
+	std::vector<TimestampSpan> download( ID3D12CommandQueue* queue )
+	{
+		std::vector<TimestampSpan> r;
+
+		uint64_t freq = 1;
+		HRESULT hr;
+		hr = queue->GetTimestampFrequency( &freq );
+		DX_ASSERT( hr == S_OK, "" );
+
+		_downloader->map( [&]( const void* p ) {
+			const uint64_t* stamp = (const uint64_t*)p;
+
+			for ( int i = 1; i < _queryHeadIndex; ++i )
+			{
+				if (_ignoreNextLabel[i - 1])
+				{
+					continue;
+				}
+				uint64_t deltaTime = stamp[i] - stamp[i - 1];
+				double durationS = (double)deltaTime / (double)freq;
+
+				TimestampSpan span;
+				span.durationS = durationS;
+				span.durationMS = durationS * 1000.0;
+				span.durationUS = durationS * 1000.0 * 1000.0;
+				if (_labels[i].empty())
+				{
+					span.label = _labels[i - 1];
+				}
+				else
+				{
+					span.label = _labels[i - 1] + " - " + _labels[i];
+				}
+				r.push_back( span );
+			}
+		} );
+
+		return r;
+	}
+
+private:
+	int _queryHeadIndex = 0;
+	int _queryCapacity = 0;
+	std::vector<std::string> _labels;
+	std::vector<int> _ignoreNextLabel;
+
+	DxPtr<ID3D12QueryHeap> _qHeap;
+	std::unique_ptr<DownloaderObject> _downloader;
 };
