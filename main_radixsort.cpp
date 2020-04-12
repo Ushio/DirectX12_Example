@@ -179,8 +179,8 @@ void run( DeviceObject* deviceObject )
 			heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
 			heap->u( deviceObject->device(), 1, counter->resource(), counter->UAVDescription() );
 			heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
-			countCompute->dispatch( commandList, dispatchsize( numberOfElement, 512 ), 1, 1 );
-
+			countCompute->dispatch(commandList, dispatchsize(numberOfElement, ELEMENTS_IN_BLOCK), 1, 1);
+			
 			resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
 
 			stumper->stampEnd( commandList );

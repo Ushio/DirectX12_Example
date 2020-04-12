@@ -1,5 +1,7 @@
 #include "helper.hlsl"
 
+#define ELEMENTS_IN_BLOCK 1024
+
 // 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
 // so buckets wants 256 counters
 cbuffer arguments : register(b0, space0)
@@ -18,26 +20,39 @@ uint getSortKey(uint x)
 	return m >> (8 * iteration);
 }
 
-[numthreads(512, 1, 1)]
-void main(uint3 gID : SV_DispatchThreadID)
+groupshared uint groupCounters[256];
+
+[numthreads(ELEMENTS_IN_BLOCK, 1, 1)]
+void main(uint3 gID : SV_DispatchThreadID, uint3 blockIndexSV: SV_GroupID, uint3 indexOnGroup: SV_GroupThreadID)
 {
-	if(numberOfElement(xs) <= gID.x)
+	if(indexOnGroup.x < 256)
 	{
-		return;
+		groupCounters[indexOnGroup.x] = 0;
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	if(gID.x < numberOfElement(xs))
+	{
+		/*
+		column major store
+		+------> counters ( 256 )
+		|(block 0, cnt=0), (block 0, cnt=1)
+		|(block 1, cnt=0), (block 1, cnt=1)
+		|(block 2, cnt=0), (block 2, cnt=1)
+		v
+		blocks ( numberOfBlock )
+		*/
+		uint value = getSortKey(xs[gID.x]);
+		uint o;
+		InterlockedAdd(groupCounters[value], 1, o);
 	}
 
-	/*
-	column major store
-	+------> counters ( 256 )
-	|(block 0, cnt=0), (block 0, cnt=1)
-	|(block 1, cnt=0), (block 1, cnt=1)
-	|(block 2, cnt=0), (block 2, cnt=1)
-	v
-	blocks ( numberOfBlock )
-	*/
-	uint value = getSortKey(xs[gID.x]);
-	uint k = elementsInBlock;
-	uint store = numberOfBlock * value + gID.x / elementsInBlock /*block index*/; 
-	uint o;
-	InterlockedAdd(counter[store], 1, o);
+	GroupMemoryBarrierWithGroupSync();
+
+	if(indexOnGroup.x < 256)
+	{
+		uint key = indexOnGroup.x;
+		uint store = numberOfBlock * key + blockIndexSV.x /*block index*/; 
+		counter[store] = groupCounters[indexOnGroup.x];
+	}
 }
