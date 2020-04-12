@@ -1,5 +1,6 @@
 #include "helper.hlsl"
 
+#define ELEMENTS_IN_BLOCK 1024
 
 // 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
 // so buckets wants 256 counters
@@ -12,8 +13,7 @@ cbuffer arguments : register(b0, space0)
 
 RWStructuredBuffer<uint> xs0 : register(u0);
 RWStructuredBuffer<uint> xs1 : register(u1);
-RWStructuredBuffer<uint> offsetCounter : register(u2);
-RWStructuredBuffer<uint> offsetTable : register(u3);
+RWStructuredBuffer<uint> offsetTable : register(u2);
 
 uint getSortKey(uint x)
 {
@@ -21,12 +21,79 @@ uint getSortKey(uint x)
 	return m >> (8 * iteration);
 }
 
-[numthreads(64, 1, 1)]
-void main(uint3 gID : SV_DispatchThreadID)
-{
-	uint blockIndex = gID.x;
+// slow...
+// groupshared uint blockxs[256];  // [item id]
+// groupshared uint offsetxs[256]; // [item id]
+// groupshared uint counters[256]; // [key]
 
-	if(numberOfBlock <= blockIndex)
+// [numthreads(256, 1, 1)]
+// void main(uint3 gID : SV_DispatchThreadID, uint3 blockIndex: SV_GroupID, uint3 indexOnSubblock: SV_GroupThreadID)
+// {
+// 	uint n = numberOfElement(xs0);
+
+// 	counters[indexOnSubblock.x] = 0;
+
+// 	for(int i = 0 ; i < 4 ; ++i)
+// 	{
+// 		// load to shared memory
+// 		uint xsIndex = blockIndex.x * ELEMENTS_IN_BLOCK + 256 * i + indexOnSubblock.x;
+// 		if( xsIndex < n )
+// 		{
+// 			blockxs[indexOnSubblock.x] = xs0[xsIndex];
+// 		}
+		
+// 		GroupMemoryBarrierWithGroupSync();
+
+// 		// count. single thread
+// 		if(indexOnSubblock.x == 0)
+// 		{
+// 			// e.g. blockIndex.x == 2, i == 1
+// 			// 
+// 			// remove this offset
+// 			// < ------------------------------------------ > 
+// 			// < -------------------------------------------|-----n >
+// 			// [ELEMENTS_IN_BLOCK] [ELEMENTS_IN_BLOCK], [256], [256 / my sub block]
+// 			uint blockxsCount = min(n - (blockIndex.x * ELEMENTS_IN_BLOCK + i * 256), 256);
+
+// 			// calculate local offset per element
+// 			for(int j = 0 ; j < blockxsCount ; ++j)
+// 			{
+// 				uint value = blockxs[j];
+// 				uint key = getSortKey(value);
+// 				uint cnt = counters[key];
+// 				offsetxs[j] = cnt;
+// 				counters[key] = cnt + 1;
+// 			}
+// 		}
+
+// 		GroupMemoryBarrierWithGroupSync();
+
+// 		if( xsIndex < n )
+// 		{
+// 			uint value = blockxs[indexOnSubblock.x];
+// 			uint offsetTableIndex = numberOfBlock * getSortKey(value) + blockIndex.x;
+// 			uint offset = offsetTable[offsetTableIndex];
+
+// 			// combine block offset, local offset
+// 			uint toIndex = offset + offsetxs[indexOnSubblock.x];
+// 			xs1[toIndex] = value;
+// 		}
+// 	}
+// }
+
+groupshared uint counters[256]; // [key]
+
+[numthreads(64, 1, 1)]
+void main(uint3 blockIndexSV: SV_GroupID, uint3 indexOnGroup: SV_GroupThreadID)
+{
+	for(int j = 0 ; j < 4 ; ++j)
+	{
+		counters[64 * j + indexOnGroup.x] = 0;
+	}
+	GroupMemoryBarrierWithGroupSync();
+	
+	uint blockIndex = blockIndexSV.x;
+	if(indexOnGroup.x != 0)
 	{
 		return;
 	}
@@ -50,14 +117,16 @@ void main(uint3 gID : SV_DispatchThreadID)
 		{
 			return;
 		}
-		uint value = getSortKey(xs0[valueIndex]);
-		uint offsetTableIndex = numberOfBlock * value + blockIndex;
 
-		uint indexOnBlock = offsetCounter[offsetTableIndex];
-		offsetCounter[offsetTableIndex] = indexOnBlock + 1;
+		uint value = xs0[valueIndex];
+		uint key = getSortKey(value);
+		uint offsetTableIndex = numberOfBlock * key + blockIndex;
+
+		uint indexOnBlock = counters[key];
+		counters[key] = indexOnBlock + 1;
 
 		uint offset = offsetTable[offsetTableIndex];
-		xs1[offset + indexOnBlock] = xs0[valueIndex];
-		// xs1[valueIndex] = indexOnBlock;
+		xs1[offset + indexOnBlock] = value;
 	}
 }
+

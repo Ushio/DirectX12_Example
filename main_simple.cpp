@@ -8,7 +8,7 @@ void run( DeviceObject* deviceObject )
 	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 	computeCommandList->setName( L"Compute" );
 
-	std::vector<float> input( 1000 );
+	std::vector<float> input( 100000 );
 	for ( int i = 0; i < input.size(); ++i )
 	{
 		input[i] = i / 10.0f;

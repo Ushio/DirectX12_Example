@@ -2,7 +2,7 @@
 #include "pr.hpp"
 #include <intrin.h>
 
-#define ELEMENTS_IN_BLOCK 512
+#define ELEMENTS_IN_BLOCK 1024
 
 // 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
 // so buckets wants 256 counters
@@ -49,7 +49,6 @@ void run( DeviceObject* deviceObject )
 
 	std::unique_ptr<ComputeObject> clearCompute( new ComputeObject() );
 	clearCompute->u( 0 );
-	clearCompute->u( 1 );
 	clearCompute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "radixsort_clear.cso" ).c_str() );
 
 	uint64_t numberOfElement = input.size();
@@ -90,9 +89,6 @@ void run( DeviceObject* deviceObject )
 	std::unique_ptr<BufferObjectUAV> globalScanTable1( new BufferObjectUAV( deviceObject->device(), globalScanBytes, sizeof( uint32_t ), D3D12_RESOURCE_STATE_COMMON ) );
 	globalScanTable0->setName( L"globalScanTable0" );
 	globalScanTable1->setName( L"globalScanTable1" );
-
-	std::unique_ptr<BufferObjectUAV> offsetCounter( new BufferObjectUAV( deviceObject->device(), counterBytes, sizeof( uint32_t ), D3D12_RESOURCE_STATE_COMMON ) );
-	offsetCounter->setName( L"offsetCounter" );
 
 	std::unique_ptr<UploaderObject> uploader( new UploaderObject( deviceObject->device(), ioDataBytes ) );
 	uploader->setName( L"uploader" );
@@ -170,10 +166,9 @@ void run( DeviceObject* deviceObject )
 			clearCompute->setComputeRootSignature( commandList );
 			heap->startNextHeapAndAssign( commandList, clearCompute->descriptorEnties() );
 			heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
-			heap->u( deviceObject->device(), 1, offsetCounter->resource(), offsetCounter->UAVDescription() );
 			clearCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
 
-			resourceBarrier( commandList, {counter->resourceBarrierUAV(), offsetCounter->resourceBarrierUAV()} );
+			resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
 
 			stumper->stampBeg( commandList, "Count" );
 
@@ -226,14 +221,15 @@ void run( DeviceObject* deviceObject )
 			heap->startNextHeapAndAssign( commandList, reorderCompute->descriptorEnties() );
 			heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
 			heap->u( deviceObject->device(), 1, xs1->resource(), xs1->UAVDescription() );
-			heap->u( deviceObject->device(), 2, offsetCounter->resource(), offsetCounter->UAVDescription() );
-			heap->u( deviceObject->device(), 3, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+			heap->u( deviceObject->device(), 2, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
 			heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
-			reorderCompute->dispatch( commandList, dispatchsize( numberOfBlock, 64 ), 1, 1 );
+			// reorderCompute->dispatch( commandList, dispatchsize( numberOfBlock, 64 ), 1, 1 );
+
+			reorderCompute->dispatch(commandList, numberOfBlock, 1, 1);
 
 			std::swap( xs0, xs1 );
 
-			resourceBarrier( commandList, {xs0->resourceBarrierUAV(), offsetCounter->resourceBarrierUAV()} );
+			resourceBarrier( commandList, {xs0->resourceBarrierUAV()} );
 
 			stumper->stampEnd( commandList );
 		}
@@ -258,7 +254,6 @@ void run( DeviceObject* deviceObject )
 	std::vector<uint32_t> counterValues = counter->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 	std::vector<uint32_t> globalScanTableValues = globalScanTable0->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 	std::vector<uint32_t> sortedValues = xs0->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
-	std::vector<uint32_t> offsetCounterValue = offsetCounter->synchronizedDownload<uint32_t>( deviceObject->device(), deviceObject->queueObject() );
 
 	// this check is RADIX_NUMBER_OF_ITERATION == 1 only
 	//// Check Counter
