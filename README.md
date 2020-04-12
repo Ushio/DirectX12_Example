@@ -3,6 +3,7 @@
 ## Examples
 - Simple
 - Gaussian Blur
+- Radix Sort
 
 ## How to run
 1. Clone
