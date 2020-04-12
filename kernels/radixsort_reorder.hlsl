@@ -7,12 +7,19 @@ cbuffer arguments : register(b0, space0)
 {
 	uint numberOfBlock;
 	uint elementsInBlock;
+	uint iteration; // 0, 1, 2, 3
 };
 
 RWStructuredBuffer<uint> xs0 : register(u0);
 RWStructuredBuffer<uint> xs1 : register(u1);
 RWStructuredBuffer<uint> offsetCounter : register(u2);
 RWStructuredBuffer<uint> offsetTable : register(u3);
+
+uint getSortKey(uint x)
+{
+	uint m = x & (0xFF << (8 * iteration));
+	return m >> (8 * iteration);
+}
 
 [numthreads(64, 1, 1)]
 void main(uint3 gID : SV_DispatchThreadID)
@@ -43,7 +50,7 @@ void main(uint3 gID : SV_DispatchThreadID)
 		{
 			return;
 		}
-		uint value = xs0[valueIndex] & 0xFF;
+		uint value = getSortKey(xs0[valueIndex]);
 		uint offsetTableIndex = numberOfBlock * value + blockIndex;
 
 		uint indexOnBlock = offsetCounter[offsetTableIndex];

@@ -682,12 +682,12 @@ public:
 		}
 		_currentHeapCount = maxIndex + 1;
 
-		DX_ASSERT(_bufferHeapHead + _currentHeapCount < _bufferHeapCapacity, "oveflow descriptor heap");
+		DX_ASSERT( _bufferHeapHead + _currentHeapCount < _bufferHeapCapacity, "oveflow descriptor heap" );
 
 		// Assign
-		ID3D12DescriptorHeap* const heaps[] = { _bufferHeap.get() };
-		commandList->SetDescriptorHeaps(1, heaps);
-		commandList->SetComputeRootDescriptorTable(0, add(_bufferHeap->GetGPUDescriptorHandleForHeapStart(), _incrementUAV * _bufferHeapHead));
+		ID3D12DescriptorHeap* const heaps[] = {_bufferHeap.get()};
+		commandList->SetDescriptorHeaps( 1, heaps );
+		commandList->SetComputeRootDescriptorTable( 0, add( _bufferHeap->GetGPUDescriptorHandleForHeapStart(), _incrementUAV * _bufferHeapHead ) );
 	}
 	void u( ID3D12Device* device, int i, ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC uavdescription )
 	{
@@ -788,7 +788,7 @@ public:
 		_bufferDescriptorEntries.push_back( entity );
 	}
 
-	void loadShaderAndBuild( ID3D12Device* device, const char* shaderFile )
+	void loadShaderAndBuild( ID3D12Device* device, const char* shaderFile, const wchar_t* name = L"" )
 	{
 		std::vector<D3D12_DESCRIPTOR_RANGE> bufferDescriptorRanges;
 		for ( int i = 0; i < _bufferDescriptorEntries.size(); ++i )
@@ -845,6 +845,8 @@ public:
 			_pipelineState = DxPtr<ID3D12PipelineState>();
 			hr = device->CreateComputePipelineState( &desc, IID_PPV_ARGS( _pipelineState.getAddressOf() ) );
 			DX_ASSERT( hr == S_OK, "" );
+
+			_pipelineState->SetName( name );
 		}
 	}
 	std::vector<DescriptorEntity> descriptorEnties() const
