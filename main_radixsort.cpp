@@ -1,4 +1,5 @@
 ﻿#include "EzDx.hpp"
+#include "WinPixEventRuntime/pix3.h"
 #include "pr.hpp"
 #include <intrin.h>
 
@@ -159,65 +160,77 @@ void run( DeviceObject* deviceObject )
 		{
 			// clear
 			stumper->stampBeg( commandList, "Count" );
-
-			// count
-			countCompute->setPipelineState( commandList );
-			countCompute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, countCompute->descriptorEnties() );
-			heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
-			heap->u( deviceObject->device(), 1, counter->resource(), counter->UAVDescription() );
-			heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
-			countCompute->dispatch(commandList, dispatchsize(numberOfElement, ELEMENTS_IN_BLOCK), 1, 1);
-			
-			resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
-
-			stumper->stampEnd( commandList );
-			stumper->stampBeg( commandList, "Scan" );
-
-			// Scan Prepare
-			scanPrepareCompute->setPipelineState( commandList );
-			scanPrepareCompute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, scanPrepareCompute->descriptorEnties() );
-			heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
-			heap->u( deviceObject->device(), 1, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
-			scanPrepareCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 128 ), 1, 1 );
-
-			resourceBarrier( commandList, {globalScanTable0->resourceBarrierUAV()} );
-
-			// globalScanTable0 is a always latest one.
-			for ( int j = 0; j < globalScanIteration; ++j )
 			{
-				scanglobalCompute->setPipelineState( commandList );
-				scanglobalCompute->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, scanglobalCompute->descriptorEnties() );
-				heap->b( deviceObject->device(), 0, scanglobalConstants[j]->resource() );
-				heap->u( deviceObject->device(), 0, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
-				heap->u( deviceObject->device(), 1, globalScanTable1->resource(), globalScanTable1->UAVDescription() );
+				PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Count [%d]", i );
 
-				scanglobalCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
+				// count
+				countCompute->setPipelineState( commandList );
+				countCompute->setComputeRootSignature( commandList );
+				heap->startNextHeapAndAssign( commandList, countCompute->descriptorEnties() );
+				heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
+				heap->u( deviceObject->device(), 1, counter->resource(), counter->UAVDescription() );
+				heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
+				countCompute->dispatch( commandList, dispatchsize( numberOfElement, ELEMENTS_IN_BLOCK ), 1, 1 );
 
-				std::swap( globalScanTable0, globalScanTable1 );
-				resourceBarrier( commandList, {globalScanTable0->resourceBarrierUAV()} );
+				resourceBarrier( commandList, {counter->resourceBarrierUAV()} );
 			}
-
 			stumper->stampEnd( commandList );
+
+			stumper->stampBeg( commandList, "Scan" );
+			{
+				PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Scan [%d]", i );
+
+				// Scan Prepare
+				scanPrepareCompute->setPipelineState( commandList );
+				scanPrepareCompute->setComputeRootSignature( commandList );
+				heap->startNextHeapAndAssign( commandList, scanPrepareCompute->descriptorEnties() );
+				heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
+				heap->u( deviceObject->device(), 1, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+				scanPrepareCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 128 ), 1, 1 );
+
+				resourceBarrier( commandList, {globalScanTable0->resourceBarrierUAV()} );
+
+				// globalScanTable0 is a always latest one.
+				for ( int j = 0; j < globalScanIteration; ++j )
+				{
+					PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Scan-step [%d]", j );
+
+					scanglobalCompute->setPipelineState( commandList );
+					scanglobalCompute->setComputeRootSignature( commandList );
+					heap->startNextHeapAndAssign( commandList, scanglobalCompute->descriptorEnties() );
+					heap->b( deviceObject->device(), 0, scanglobalConstants[j]->resource() );
+					heap->u( deviceObject->device(), 0, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+					heap->u( deviceObject->device(), 1, globalScanTable1->resource(), globalScanTable1->UAVDescription() );
+
+					scanglobalCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 64 ), 1, 1 );
+
+					std::swap( globalScanTable0, globalScanTable1 );
+					resourceBarrier( commandList, {globalScanTable0->resourceBarrierUAV()} );
+				}
+
+				stumper->stampEnd( commandList );
+			}
 			stumper->stampBeg( commandList, "Reorder" );
 
-			// Reorder
-			reorderCompute->setPipelineState( commandList );
-			reorderCompute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, reorderCompute->descriptorEnties() );
-			heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
-			heap->u( deviceObject->device(), 1, xs1->resource(), xs1->UAVDescription() );
-			heap->u( deviceObject->device(), 2, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
-			heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
-			// reorderCompute->dispatch( commandList, dispatchsize( numberOfBlock, 64 ), 1, 1 );
+			{
+				// Reorder
+				PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Reorder [%d]", i );
 
-			reorderCompute->dispatch(commandList, numberOfBlock, 1, 1);
+				reorderCompute->setPipelineState( commandList );
+				reorderCompute->setComputeRootSignature( commandList );
+				heap->startNextHeapAndAssign( commandList, reorderCompute->descriptorEnties() );
+				heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
+				heap->u( deviceObject->device(), 1, xs1->resource(), xs1->UAVDescription() );
+				heap->u( deviceObject->device(), 2, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
+				heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
+				// reorderCompute->dispatch( commandList, dispatchsize( numberOfBlock, 64 ), 1, 1 );
 
-			std::swap( xs0, xs1 );
+				reorderCompute->dispatch( commandList, numberOfBlock, 1, 1 );
 
-			resourceBarrier( commandList, {xs0->resourceBarrierUAV()} );
+				std::swap( xs0, xs1 );
+
+				resourceBarrier( commandList, {xs0->resourceBarrierUAV()} );
+			}
 
 			stumper->stampEnd( commandList );
 		}

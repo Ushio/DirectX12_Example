@@ -912,23 +912,23 @@ public:
 			_labels.push_back( buffer );
 		}
 
-		_ignoreNextLabel.push_back(0);
+		_ignoreNextLabel.push_back( 0 );
 	}
-	void stampBeg(ID3D12GraphicsCommandList* command, const char* label)
+	void stampBeg( ID3D12GraphicsCommandList* command, const char* label )
 	{
-		DX_ASSERT(_queryHeadIndex < _queryCapacity, "capacity overflow");
-		command->EndQuery(_qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++);
+		DX_ASSERT( _queryHeadIndex < _queryCapacity, "capacity overflow" );
+		command->EndQuery( _qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++ );
 
-		_labels.push_back(label);
-		_ignoreNextLabel.push_back(0);
+		_labels.push_back( label );
+		_ignoreNextLabel.push_back( 0 );
 	}
-	void stampEnd(ID3D12GraphicsCommandList* command)
+	void stampEnd( ID3D12GraphicsCommandList* command )
 	{
-		DX_ASSERT(_queryHeadIndex < _queryCapacity, "capacity overflow");
-		command->EndQuery(_qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++);
+		DX_ASSERT( _queryHeadIndex < _queryCapacity, "capacity overflow" );
+		command->EndQuery( _qHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, _queryHeadIndex++ );
 
-		_labels.push_back("");
-		_ignoreNextLabel.push_back(1);
+		_labels.push_back( "" );
+		_ignoreNextLabel.push_back( 1 );
 	}
 
 	void clear()
@@ -955,7 +955,7 @@ public:
 
 			for ( int i = 1; i < _queryHeadIndex; ++i )
 			{
-				if (_ignoreNextLabel[i - 1])
+				if ( _ignoreNextLabel[i - 1] )
 				{
 					continue;
 				}
@@ -966,7 +966,7 @@ public:
 				span.durationS = durationS;
 				span.durationMS = durationS * 1000.0;
 				span.durationUS = durationS * 1000.0 * 1000.0;
-				if (_labels[i].empty())
+				if ( _labels[i].empty() )
 				{
 					span.label = _labels[i - 1];
 				}

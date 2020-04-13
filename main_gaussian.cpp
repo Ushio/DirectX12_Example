@@ -1,4 +1,5 @@
 ﻿#include "EzDx.hpp"
+#include "WinPixEventRuntime/pix3.h"
 #include "pr.hpp"
 
 struct Arguments
@@ -114,60 +115,66 @@ void run( DeviceObject* deviceObject )
 									  } );
 
 		stumper->stamp( commandList, "degamma" );
+		{
+			PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Degamma" );
 
-		// Degamma
-		degammaCompute->setPipelineState( commandList );
-		degammaCompute->setComputeRootSignature( commandList );
-		heap->startNextHeapAndAssign( commandList, degammaCompute->descriptorEnties() );
-		heap->u( deviceObject->device(), 0, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
-		heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+			// Degamma
+			degammaCompute->setPipelineState( commandList );
+			degammaCompute->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, degammaCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
+			heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 
-		degammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
+			degammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
-		resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
-
+			resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
+		}
 		stumper->stamp( commandList, "gaussian H" );
+		{
+			PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Gaussian H -> V" );
 
-		// Gaussian Pipeline
-		gaussianCompute->setPipelineState( commandList );
-		gaussianCompute->setComputeRootSignature( commandList );
+			// Gaussian Pipeline
+			gaussianCompute->setPipelineState( commandList );
+			gaussianCompute->setComputeRootSignature( commandList );
 
-		// Horizontal
-		heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
-		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
-		heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
-		heap->b( deviceObject->device(), 0, arguments_H->resource() );
-		gaussianCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
+			// Horizontal
+			heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+			heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
+			heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
+			heap->b( deviceObject->device(), 0, arguments_H->resource() );
+			gaussianCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
-		// Just valueBuffer1 will be modified.
-		resourceBarrier( commandList, {valueBuffer1->resourceBarrierUAV()} );
+			// Just valueBuffer1 will be modified.
+			resourceBarrier( commandList, {valueBuffer1->resourceBarrierUAV()} );
 
-		stumper->stamp( commandList, "gaussian V" );
+			stumper->stamp( commandList, "gaussian V" );
 
-		// Vertical
-		heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
-		heap->u( deviceObject->device(), 0, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
-		heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
-		heap->b( deviceObject->device(), 0, arguments_V->resource() );
-		gaussianCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
+			// Vertical
+			heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
+			heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+			heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
+			heap->b( deviceObject->device(), 0, arguments_V->resource() );
+			gaussianCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
-		// Just valueBuffer0 will be modified.
-		resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
-
+			// Just valueBuffer0 will be modified.
+			resourceBarrier( commandList, {valueBuffer0->resourceBarrierUAV()} );
+		}
 		stumper->stamp( commandList, "gamma" );
+		{
+			PIXScopedEvent( commandList, PIX_COLOR_DEFAULT, "Gamma" );
 
-		// Gamma
-		gammaCompute->setPipelineState( commandList );
-		gammaCompute->setComputeRootSignature( commandList );
-		heap->startNextHeapAndAssign( commandList, gammaCompute->descriptorEnties() );
-		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		heap->u( deviceObject->device(), 1, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
-		gammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
+			// Gamma
+			gammaCompute->setPipelineState( commandList );
+			gammaCompute->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, gammaCompute->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
+			heap->u( deviceObject->device(), 1, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
+			gammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
 
-		resourceBarrier( commandList, {ioImageBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
-
+			resourceBarrier( commandList, {ioImageBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+		}
 		stumper->stamp( commandList, "download" );
 
 		// download
