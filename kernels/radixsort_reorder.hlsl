@@ -1,6 +1,6 @@
 #include "helper.hlsl"
 
-#define ELEMENTS_IN_BLOCK 1024
+#define ELEMENTS_IN_BLOCK 512
 
 // 4 stages, uint = [8 bit] [8 bit] [8 bit] [8 bit]
 // so buckets wants 256 counters
