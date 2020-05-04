@@ -14,7 +14,8 @@ struct Arguments
 class Rt
 {
 public:
-	Rt( DeviceObject* deviceObject, const lwh::Polygon* polygon, int width, int height ) : _width( width ), _height( height ), _deviceObject( deviceObject )
+	Rt( DeviceObject* deviceObject, const lwh::Polygon* polygon, int width, int height ) 
+		: _width( width ), _height( height ), _deviceObject( deviceObject )
 	{
 		computeCommandList = std::unique_ptr<CommandObject>( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 		computeCommandList->setName( L"Compute" );
@@ -25,12 +26,42 @@ public:
 
 		compute = std::unique_ptr<ComputeObject>( new ComputeObject() );
 		compute->u( 0 );
+		compute->u( 1 );
+		compute->u( 2 );
 		compute->b( 0 );
 		compute->loadShaderAndBuild( deviceObject->device(), pr::GetDataPath( "linear_rt.cso" ).c_str() );
 
 		_argument = std::unique_ptr<ConstantBufferObject>( new ConstantBufferObject( deviceObject->device(), sizeof( Arguments ), D3D12_RESOURCE_STATE_COMMON ) );
 
 		texture = std::unique_ptr<pr::ITexture>( pr::CreateTexture() );
+
+		uint32_t vBytes = polygon->P.size() * sizeof(glm::vec3);
+		uint32_t iBytes = polygon->indices.size() * sizeof(uint32_t);
+		vertexBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), vBytes, sizeof(glm::vec3), D3D12_RESOURCE_STATE_COPY_DEST));
+		indexBuffer  = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), iBytes, sizeof(uint32_t), D3D12_RESOURCE_STATE_COPY_DEST));
+		UploaderObject v_uploader(deviceObject->device(), vBytes);
+		UploaderObject i_uploader(deviceObject->device(), iBytes);
+		v_uploader.map([&](void* p) {
+			memcpy(p, polygon->P.data(), vBytes);
+		});
+		i_uploader.map([&](void* p) {
+			memcpy(p, polygon->indices.data(), iBytes);
+		});
+		computeCommandList->storeCommand([&](ID3D12GraphicsCommandList* commandList) {
+			vertexBuffer->copyFrom(commandList, &v_uploader);
+			indexBuffer->copyFrom(commandList, &i_uploader);
+
+			resourceBarrier(commandList, {
+				vertexBuffer->resourceBarrierTransition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON),
+				indexBuffer->resourceBarrierTransition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON),
+			});
+		});
+
+		deviceObject->queueObject()->execute(computeCommandList.get());
+
+		// wait for copying
+		std::shared_ptr<FenceObject> fence = deviceObject->queueObject()->fence(deviceObject->device());
+		fence->wait();
 	}
 	int width() const { return _width; }
 	int height() const { return _height; }
@@ -60,6 +91,9 @@ public:
 			compute->setComputeRootSignature( commandList );
 			heap->startNextHeapAndAssign( commandList, compute->descriptorEnties() );
 			heap->u( deviceObject->device(), 0, colorRGBX8Buffer->resource(), colorRGBX8Buffer->UAVDescription() );
+			heap->u( deviceObject->device(), 1, vertexBuffer->resource(), vertexBuffer->UAVDescription() );
+			heap->u( deviceObject->device(), 2, indexBuffer->resource(), indexBuffer->UAVDescription() );
+			
 			heap->b( deviceObject->device(), 0, _argument->resource() );
 			compute->dispatch( commandList, dispatchsize( _width * _height, 64 ), 1, 1 );
 
@@ -104,6 +138,9 @@ private:
 	std::unique_ptr<StackDescriptorHeapObject> heap;
 	std::unique_ptr<ComputeObject> compute;
 
+	std::unique_ptr<BufferObjectUAV> vertexBuffer;
+	std::unique_ptr<BufferObjectUAV> indexBuffer;
+
 	std::unique_ptr<BufferObjectUAV> accumulationBuffer;
 	std::unique_ptr<BufferObjectUAV> colorRGBX8Buffer;
 	std::unique_ptr<DownloaderObject> downloader;
@@ -111,71 +148,6 @@ private:
 
 	std::unique_ptr<ConstantBufferObject> _argument;
 };
-
-void run( DeviceObject* deviceObject )
-{
-	using namespace pr;
-
-	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
-	computeCommandList->setName( L"Compute" );
-
-	std::vector<float> input( 100000 );
-	for ( int i = 0; i < input.size(); ++i )
-	{
-		input[i] = i / 10.0f;
-	}
-
-	uint64_t numberOfElement = input.size();
-	uint64_t ioDataBytes = sizeof( float ) * input.size();
-
-	std::unique_ptr<BufferObjectUAV> valueBuffer0( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( float ), D3D12_RESOURCE_STATE_COPY_DEST ) );
-	std::unique_ptr<BufferObjectUAV> valueBuffer1( new BufferObjectUAV( deviceObject->device(), ioDataBytes, sizeof( float ), D3D12_RESOURCE_STATE_COMMON ) );
-	valueBuffer0->setName( L"valueBuffer0" );
-	valueBuffer1->setName( L"valueBuffer1" );
-
-	std::unique_ptr<UploaderObject> uploader( new UploaderObject( deviceObject->device(), ioDataBytes ) );
-	uploader->setName( L"uploader" );
-	uploader->map( [&]( void* p ) {
-		memcpy( p, input.data(), ioDataBytes );
-	} );
-
-	std::unique_ptr<ComputeObject> compute( new ComputeObject() );
-	compute->u( 0 );
-	compute->u( 1 );
-	compute->loadShaderAndBuild( deviceObject->device(), GetDataPath( "simple.cso" ).c_str() );
-	std::shared_ptr<StackDescriptorHeapObject> heap( new StackDescriptorHeapObject( deviceObject->device(), 32 ) );
-
-	computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
-		// upload
-		valueBuffer0->copyFrom( commandList, uploader.get() );
-
-		// upload memory barrier
-		resourceBarrier( commandList, {valueBuffer0->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON )} );
-
-		// Execute
-		compute->setPipelineState( commandList );
-		compute->setComputeRootSignature( commandList );
-		heap->startNextHeapAndAssign( commandList, compute->descriptorEnties() );
-		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
-		heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
-		compute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
-	} );
-
-	deviceObject->queueObject()->execute( computeCommandList.get() );
-
-	std::vector<float> output = valueBuffer1->synchronizedDownload<float>( deviceObject->device(), deviceObject->queueObject() );
-	{
-		FILE* fp = fopen( GetDataPath( "output.txt" ).c_str(), "w" );
-		for ( int i = 0; i < output.size(); ++i )
-		{
-			fprintf( fp, "%f\n", output[i] );
-		}
-		fclose( fp );
-	}
-
-	// for debugger tools.
-	deviceObject->present();
-}
 
 int main()
 {
@@ -243,6 +215,8 @@ int main()
 
 	double e = GetElapsedTime();
 
+	bool showWire = false;
+
 	while ( pr::NextFrame() == false )
 	{
 		if ( IsImGuiUsingMouse() == false )
@@ -268,26 +242,29 @@ int main()
 		DrawGrid( GridAxis::XZ, 1.0f, 10, {128, 128, 128} );
 		DrawXYZAxis( 1.0f );
 
-		BeginCameraWithObjectTransform( camera, lwhPolygon.polygon->xform );
-		PrimBegin( PrimitiveMode::Lines );
-		for ( int i = 0; i < lwhPolygon.polygon->indices.size(); i += 3 )
+		if (showWire)
 		{
-			int a = lwhPolygon.polygon->indices[i];
-			int b = lwhPolygon.polygon->indices[i + 1];
-			int c = lwhPolygon.polygon->indices[i + 2];
-			glm::u8vec3 color = {
-				255,
-				255,
-				255};
-			PrimVertex( lwhPolygon.polygon->P[a], color );
-			PrimVertex( lwhPolygon.polygon->P[b], color );
-			PrimVertex( lwhPolygon.polygon->P[b], color );
-			PrimVertex( lwhPolygon.polygon->P[c], color );
-			PrimVertex( lwhPolygon.polygon->P[c], color );
-			PrimVertex( lwhPolygon.polygon->P[a], color );
+			BeginCameraWithObjectTransform(camera, lwhPolygon.polygon->xform);
+			PrimBegin(PrimitiveMode::Lines);
+			for (int i = 0; i < lwhPolygon.polygon->indices.size(); i += 3)
+			{
+				int a = lwhPolygon.polygon->indices[i];
+				int b = lwhPolygon.polygon->indices[i + 1];
+				int c = lwhPolygon.polygon->indices[i + 2];
+				glm::u8vec3 color = {
+					255,
+					255,
+					255 };
+				PrimVertex(lwhPolygon.polygon->P[a], color);
+				PrimVertex(lwhPolygon.polygon->P[b], color);
+				PrimVertex(lwhPolygon.polygon->P[b], color);
+				PrimVertex(lwhPolygon.polygon->P[c], color);
+				PrimVertex(lwhPolygon.polygon->P[c], color);
+				PrimVertex(lwhPolygon.polygon->P[a], color);
+			}
+			PrimEnd();
+			EndCamera();
 		}
-		PrimEnd();
-		EndCamera();
 
 		PopGraphicState();
 		EndCamera();
@@ -297,6 +274,7 @@ int main()
 		ImGui::SetNextWindowSize( {500, 800}, ImGuiCond_Once );
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "fps = %f", GetFrameRate() );
+		ImGui::Checkbox("showWire", &showWire);
 
 		rt->OnImGUI();
 
