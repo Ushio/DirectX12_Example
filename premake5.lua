@@ -151,3 +151,42 @@ project "RadixSort"
         targetname ("RadixSort")
         optimize "Full"
     filter{}
+
+project "LinearRayCaster"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "bin/"
+    systemversion "latest"
+    flags { "MultiProcessorCompile", "NoPCH" }
+
+    -- Src
+    files { "main_rt.cpp", "EzDx.hpp", "lwHoudiniLoader.hpp" }
+
+    -- directx
+    dx()
+
+    -- Helper
+    files { "libs/dxhelper/*.h" }
+    includedirs { "libs/dxhelper/" }
+
+    -- rapidjson
+    includedirs { "libs/rapidjson/include" }
+    files { "libs/rapidjson/include/**.h" }
+
+    -- prlib
+    prlib()
+
+    -- pix
+    pix( true )
+    
+    symbols "On"
+
+    filter {"Debug"}
+        runtime "Debug"
+        targetname ("LinearRayCaster_Debug")
+        optimize "Off"
+    filter {"Release"}
+        runtime "Release"
+        targetname ("LinearRayCaster")
+        optimize "Full"
+    filter{}

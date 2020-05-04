@@ -613,6 +613,7 @@ public:
 		return CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), from, to );
 	}
 
+	// You must manage state by resourceBarrier
 	template <class T>
 	void upload( ID3D12GraphicsCommandList* commandList, T value )
 	{
