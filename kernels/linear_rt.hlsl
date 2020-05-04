@@ -140,19 +140,15 @@ bool slabs(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float farclip_t)
 	float3 tmin = min(t0, t1), tmax = max(t0, t1);
 	float region_min = compMax(tmin);
 	float region_max = compMin(tmax);
+	
 	return region_min <= region_max && 0.0f <= region_max && region_min <= farclip_t;
 }
 
-groupshared float3 vertices[64 * 3];
+groupshared float3 localVertices[64 * 3];
 
 [numthreads(64, 1, 1)]
 void main(uint3 gID : SV_DispatchThreadID)
 {
-	// if(numberOfElement(colorRGBXBuffer) <= gID.x)
-	// {
-	// 	return;
-	// }
-
 	int x = gID.x % cb_width;
 	int y = gID.x / cb_width;
 
@@ -170,45 +166,59 @@ void main(uint3 gID : SV_DispatchThreadID)
 	float2 uv;
 	
 	float3 one_over_rd = float3(1.0f, 1.0f, 1.0f) / rd;
-	for(int iPrim = 0 ; iPrim < primCount ; iPrim++)
+
+	int iPrim = 0;
+	while(iPrim < primCount)
 	{
-		if( iPrim % WaveGetLaneCount() == 0 )
-		{
-			int index = min(
-				iPrim + WaveGetLaneIndex(),
-				primCount - 1
-			) * 3;
-			float3 v0 = vertexBuffer[indexBuffer[index]];
-			float3 v1 = vertexBuffer[indexBuffer[index+1]];
-			float3 v2 = vertexBuffer[indexBuffer[index+2]];
-
-			float3 lower = min(min(v0, v1), v2);
-			float3 upper = max(max(v0, v1), v2);
-			float3 waveLower = WaveActiveMin(lower);
-			float3 waveUpper = WaveActiveMax(upper);
-
-			bool skipOK = slabs(waveLower, waveUpper, ro, one_over_rd, tmin) == false;
-			// check wave because all threads have to use the same iPrim
-			if( WaveActiveAllTrue(skipOK) )
-			{
-				iPrim += WaveGetLaneCount() - 1;
-				continue;
-			}
-		}
-
-		int index = iPrim * 3;
+		// load WaveGetLaneCount() prims
+		int index = min(
+			iPrim + WaveGetLaneIndex(),
+			primCount - 1
+		) * 3;
 		float3 v0 = vertexBuffer[indexBuffer[index]];
 		float3 v1 = vertexBuffer[indexBuffer[index+1]];
 		float3 v2 = vertexBuffer[indexBuffer[index+2]];
+		
+		float3 lower = min(min(v0, v1), v2);
+		float3 upper = max(max(v0, v1), v2);
+		float3 waveLower = WaveActiveMin(lower);
+		float3 waveUpper = WaveActiveMax(upper);
+		bool skipOK = slabs(waveLower, waveUpper, ro, one_over_rd, tmin) == false;
 
-		if(intersect_ray_triangle(ro, rd, v0, v1, v2, tmin, uv))
+		// check wave because all threads have to use the same iPrim
+		if( WaveActiveAllTrue(skipOK) )
 		{
-			float3 n = cross(v1 - v0, v2 - v0);
-			isect = float4(tmin, -n /* index buffer stored as CW */);
+			// Go next block
+			iPrim += WaveGetLaneCount();
+			continue;
 		}
+
+		// store LDS
+		int storeBaseIndex = WaveGetLaneIndex() * 3;
+		localVertices[storeBaseIndex]     = v0;
+		localVertices[storeBaseIndex + 1] = v1;
+		localVertices[storeBaseIndex + 2] = v2;
+
+		GroupMemoryBarrierWithGroupSync();
+
+		int n = min(iPrim + WaveGetLaneCount(), primCount - 1) - iPrim;
+		for(int i = 0 ; i < n ; ++i)
+		{
+			int baseIndex = i * 3;
+			float3 v0 = localVertices[baseIndex];
+			float3 v1 = localVertices[baseIndex+1];
+			float3 v2 = localVertices[baseIndex+2];
+
+			if(intersect_ray_triangle(ro, rd, v0, v1, v2, tmin, uv))
+			{
+				float3 n = cross(v1 - v0, v2 - v0);
+				isect = float4(tmin, -n /* index buffer stored as CW */);
+			}
+		}
+		
+		iPrim += WaveGetLaneCount();
 	}
 
-	
 	// for(int iPrim = 0 ; iPrim < primCount ; iPrim++)
 	// {
 	// 	int index = iPrim * 3;
