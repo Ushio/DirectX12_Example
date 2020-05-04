@@ -35,6 +35,8 @@ public:
 
 		texture = std::unique_ptr<pr::ITexture>( pr::CreateTexture() );
 
+		_timestamp = std::unique_ptr<TimestampObject>(new TimestampObject(deviceObject->device(), 128));
+
 		uint32_t vBytes = polygon->P.size() * sizeof(glm::vec3);
 		uint32_t iBytes = polygon->indices.size() * sizeof(uint32_t);
 		vertexBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), vBytes, sizeof(glm::vec3), D3D12_RESOURCE_STATE_COPY_DEST));
@@ -71,6 +73,7 @@ public:
 		DeviceObject* deviceObject = _deviceObject;
 
 		heap->clear();
+		_timestamp->clear();
 
 		computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 			// Update Argument
@@ -85,6 +88,7 @@ public:
 			resourceBarrier( commandList, {
 											  _argument->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ),
 										  } );
+			_timestamp->stampBeg( commandList, "RayCast" );
 
 			// Execute
 			compute->setPipelineState( commandList );
@@ -97,9 +101,13 @@ public:
 			heap->b( deviceObject->device(), 0, _argument->resource() );
 			compute->dispatch( commandList, dispatchsize( _width * _height, 64 ), 1, 1 );
 
+			_timestamp->stampEnd( commandList );
+
 			resourceBarrier( commandList, {colorRGBX8Buffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
 			colorRGBX8Buffer->copyTo( commandList, downloader.get() );
 			resourceBarrier( commandList, {colorRGBX8Buffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
+		
+			_timestamp->resolve( commandList );
 		} );
 
 		deviceObject->queueObject()->execute( computeCommandList.get() );
@@ -113,6 +121,7 @@ public:
 		downloader->map( [&]( const void* p ) {
 			texture->uploadAsRGBA8( (const uint8_t*)p, _width, _height );
 		} );
+		timestampSpans = _timestamp->download( deviceObject->queueObject()->queue() );
 
 		deviceObject->present();
 	}
@@ -127,6 +136,10 @@ public:
 	}
 	void OnImGUI()
 	{
+		for (int i = 0; i < timestampSpans.size(); ++i)
+		{
+			ImGui::Text("%s, %.3f ms", timestampSpans[i].label.c_str(), timestampSpans[i].durationMS);
+		}
 	}
 
 private:
@@ -147,6 +160,9 @@ private:
 	std::unique_ptr<pr::ITexture> texture;
 
 	std::unique_ptr<ConstantBufferObject> _argument;
+
+	std::unique_ptr<TimestampObject> _timestamp;
+	std::vector<TimestampSpan> timestampSpans;
 };
 
 int main()

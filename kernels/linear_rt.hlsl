@@ -116,21 +116,42 @@ inline bool intersect_ray_triangle(float3 ro, float3 rd, float3 v0, float3 v1, f
 	// float t = dot(v0v2, qvec) * invDet;
 
 	// const float kEpsilon = 1.0e-8;
-	// if (kEpsilon < fabs(det) && 0.0f < u && 0.0f < v && u + v < 1.0f && 0.0f < t & t < *tmin) {
-	// 	*tmin = t;
-	// 	*uv = (float2)(u, v);
+	// if (kEpsilon < abs(det) && 0.0f < u && 0.0f < v && u + v < 1.0f && 0.0f < t & t < tmin) {
+	// 	tmin = t;
+	// 	uv = float2(u, v);
 	// 	return true;
 	// }
 	// return false;
 }
 
+float compMin(float3 v){
+	return min(min(v.x, v.y), v.z);
+}
+float compMax(float3 v){
+	return max(max(v.x, v.y), v.z);
+}
+bool slabs(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float farclip_t) {
+	float3 t0 = (p0 - ro) * one_over_rd;
+	float3 t1 = (p1 - ro) * one_over_rd;
+
+	// t0 = select(t0, -t1, isnan(t0));
+	// t1 = select(t1, -t0, isnan(t1));
+
+	float3 tmin = min(t0, t1), tmax = max(t0, t1);
+	float region_min = compMax(tmin);
+	float region_max = compMin(tmax);
+	return region_min <= region_max && 0.0f <= region_max && region_min <= farclip_t;
+}
+
+groupshared float3 vertices[64 * 3];
+
 [numthreads(64, 1, 1)]
 void main(uint3 gID : SV_DispatchThreadID)
 {
-	if(numberOfElement(colorRGBXBuffer) <= gID.x)
-	{
-		return;
-	}
+	// if(numberOfElement(colorRGBXBuffer) <= gID.x)
+	// {
+	// 	return;
+	// }
 
 	int x = gID.x % cb_width;
 	int y = gID.x / cb_width;
@@ -139,23 +160,71 @@ void main(uint3 gID : SV_DispatchThreadID)
 	float3 rd;
 	shoot(ro, rd, cb_width, cb_height, x, y, cb_inverseVP);
 
-	// float4 isect = float4(-1.0f, 0.0f, 0.0f, 0.0f);
-	float4 isect = intersect_sphere(ro, rd, float3(1.0f, 1.0f, 0.0f), 1.0f);
+	float4 isect = float4(-1.0f, 0.0f, 0.0f, 0.0f);
+	// float4 isect = intersect_sphere(ro, rd, float3(1.0f, 1.0f, 0.0f), 1.0f);
 
 	int indexCount = numberOfElement(indexBuffer);
-	float tmin = isect.x < 0.0f ? FLT_MAX : isect.x;
+	int primCount = indexCount / 3;
 
+	float tmin = isect.x < 0.0f ? FLT_MAX : isect.x;
 	float2 uv;
-	for(int i = 0 ; i < indexCount ; i += 3)
+	
+	float3 one_over_rd = float3(1.0f, 1.0f, 1.0f) / rd;
+	for(int iPrim = 0 ; iPrim < primCount ; iPrim++)
 	{
-		float3 v0 = vertexBuffer[indexBuffer[i]];
-		float3 v1 = vertexBuffer[indexBuffer[i+1]];
-		float3 v2 = vertexBuffer[indexBuffer[i+2]];
+		if( iPrim % WaveGetLaneCount() == 0 )
+		{
+			int index = min(
+				iPrim + WaveGetLaneIndex(),
+				primCount - 1
+			) * 3;
+			float3 v0 = vertexBuffer[indexBuffer[index]];
+			float3 v1 = vertexBuffer[indexBuffer[index+1]];
+			float3 v2 = vertexBuffer[indexBuffer[index+2]];
+
+			float3 lower = min(min(v0, v1), v2);
+			float3 upper = max(max(v0, v1), v2);
+			float3 waveLower = WaveActiveMin(lower);
+			float3 waveUpper = WaveActiveMax(upper);
+
+			bool skipOK = slabs(waveLower, waveUpper, ro, one_over_rd, tmin) == false;
+			// check wave because all threads have to use the same iPrim
+			if( WaveActiveAllTrue(skipOK) )
+			{
+				iPrim += WaveGetLaneCount() - 1;
+				continue;
+			}
+		}
+
+		int index = iPrim * 3;
+		float3 v0 = vertexBuffer[indexBuffer[index]];
+		float3 v1 = vertexBuffer[indexBuffer[index+1]];
+		float3 v2 = vertexBuffer[indexBuffer[index+2]];
+
 		if(intersect_ray_triangle(ro, rd, v0, v1, v2, tmin, uv))
 		{
 			float3 n = cross(v1 - v0, v2 - v0);
 			isect = float4(tmin, -n /* index buffer stored as CW */);
 		}
+	}
+
+	
+	// for(int iPrim = 0 ; iPrim < primCount ; iPrim++)
+	// {
+	// 	int index = iPrim * 3;
+	// 	float3 v0 = vertexBuffer[indexBuffer[index]];
+	// 	float3 v1 = vertexBuffer[indexBuffer[index+1]];
+	// 	float3 v2 = vertexBuffer[indexBuffer[index+2]];
+
+	// 	if(intersect_ray_triangle(ro, rd, v0, v1, v2, tmin, uv))
+	// 	{
+	// 		float3 n = cross(v1 - v0, v2 - v0);
+	// 		isect = float4(tmin, -n /* index buffer stored as CW */);
+	// 	}
+	// }
+
+	if(numberOfElement(colorRGBXBuffer) <= gID.x) {
+		return;
 	}
 	
 	float4 color = float4(0.0f, 0.0f, 0.0f, 1.0f);
