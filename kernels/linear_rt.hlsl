@@ -144,11 +144,14 @@ bool slabs(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float farclip_t)
 	return region_min <= region_max && 0.0f <= region_max && region_min <= farclip_t;
 }
 
-groupshared float3 localVertices[64 * 3];
+#define NUM_THREAD 64
+groupshared float3 localVertices[NUM_THREAD * 3];
 
-[numthreads(64, 1, 1)]
-void main(uint3 gID : SV_DispatchThreadID)
+[numthreads(NUM_THREAD, 1, 1)]
+void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 {
+	int sharedBaseIndex = WaveGetLaneCount() * (localID.x / WaveGetLaneCount()) * 3;
+
 	int x = gID.x % cb_width;
 	int y = gID.x / cb_width;
 
@@ -194,17 +197,17 @@ void main(uint3 gID : SV_DispatchThreadID)
 		}
 
 		// store LDS
-		int storeBaseIndex = WaveGetLaneIndex() * 3;
+		int storeBaseIndex = sharedBaseIndex + WaveGetLaneIndex() * 3;
 		localVertices[storeBaseIndex]     = v0;
 		localVertices[storeBaseIndex + 1] = v1;
 		localVertices[storeBaseIndex + 2] = v2;
 
 		GroupMemoryBarrierWithGroupSync();
 
-		int n = min(iPrim + WaveGetLaneCount(), primCount - 1) - iPrim;
+		int n = min(iPrim + WaveGetLaneCount(), primCount) - iPrim;
 		for(int i = 0 ; i < n ; ++i)
 		{
-			int baseIndex = i * 3;
+			int baseIndex = sharedBaseIndex + i * 3;
 			float3 v0 = localVertices[baseIndex];
 			float3 v1 = localVertices[baseIndex+1];
 			float3 v2 = localVertices[baseIndex+2];
