@@ -2,6 +2,7 @@ import hou
 import json
 import os
 import time
+import inlinecpp
 
 # node: hou.ObjNode
 def exportObjGeometry(node):
@@ -49,19 +50,72 @@ def exportObjGeometry(node):
 
     data['Points'] = Points
 
-    # traverse primitives
-    skippedPrimitive = 0
-    PointNum = [] # for Vertices
-    for prim in rGeom.prims():
-        if prim.type() != hou.primType.Polygon or prim.numVertices() != 3:
-            skippedPrimitive += 1 
-            continue
-        
-        for vertex in prim.vertices():
-            PointNum.append(vertex.point().number())
+    # traverse primitives ( Naive, It's really slow )
+    # PointNum = [] # for Vertices
+    # for prim in rGeom.prims():
+    #     for vertex in prim.vertices():
+    #         PointNum.append(vertex.point().number())
+
+    # traverse primitives ( Optimized )
+    cpp_geo_methods = inlinecpp.createLibrary("cpp_geo_methods",
+    includes="#include <GU/GU_Detail.h>\n#include <GA/GA_GBIterators.h>",
+    structs=[("IntArray", "*i"),],
+    function_sources=[
+    """
+    IntArray getIndices(const GU_Detail *gdp)
+    {
+        std::vector<int> ids;
+
+        GA_GBPrimitiveIterator iter(*gdp);
+        GA_Primitive *prim;
+        while( prim = iter.getPrimitive() )
+        {
+            int n = prim->getVertexCount();
+
+            // limit
+            if ( 3 < n ) { n = 3; }
+
+            for(int i = 0 ; i < n ; ++i)
+            {
+                ids.push_back(prim->getPointIndex(i));
+            }
+            iter.advance();
+        }
+
+        return ids;
+    }
+    """,
+    """
+    IntArray getIndexCountsPerPrim(const GU_Detail *gdp)
+    {
+        std::vector<int> ids;
+
+        GA_GBPrimitiveIterator iter(*gdp);
+        GA_Primitive *prim;
+        while( prim = iter.getPrimitive() )
+        {
+            int n = prim->getVertexCount();
+            ids.push_back(n);
+            iter.advance();
+        }
+
+        return ids;
+    }
+    """
+    ])
+
+    indices_cpp = cpp_geo_methods.getIndices(rGeom)
+    indexCounts_cpp = cpp_geo_methods.getIndexCountsPerPrim(rGeom)
+    PointNum = []
+    for idx in indices_cpp: 
+        PointNum.append(idx)
+    IndexCount = []
+    for n in indexCounts_cpp:
+        IndexCount.append(n)
 
     Vertices = {
-        'Point Num' : PointNum
+        'Point Num' : PointNum,
+        'Index Count' : IndexCount
     }
 
     # Get Vertices Attributes
@@ -73,10 +127,6 @@ def exportObjGeometry(node):
         print('    VertAttrib: ' + vert.name())
 
     data['Vertices'] = Vertices
-
-    if skippedPrimitive != 0:
-        print("    There are {} invalid prims by some reasons.".format(skippedPrimitive))
-        return
 
     # Get Primitive Attributes
     Primitives = {}

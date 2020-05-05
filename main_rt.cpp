@@ -219,7 +219,8 @@ int main()
 	config.SwapInterval = 1;
 	Initialize( config );
 
-	std::shared_ptr<Rt> rt = std::shared_ptr<Rt>( new Rt( devices[0].get(), lwhPolygon.polygon, GetScreenWidth(), GetScreenHeight() ) );
+	std::shared_ptr<Rt> rt;
+	//  = std::shared_ptr<Rt>(new Rt(devices[0].get(), lwhPolygon.polygon, GetScreenWidth(), GetScreenHeight()));
 
 	Camera3D camera;
 	camera.origin = {4, 4, 4};
@@ -241,13 +242,16 @@ int main()
 		}
 
 		// ClearBackground( 0.1f, 0.1f, 0.1f, 1 );
+
+		if (rt == nullptr || rt->width() != GetScreenWidth() || rt->height() != GetScreenHeight())
+		{
+			rt = std::shared_ptr<Rt>();
+			rt = std::shared_ptr<Rt>(new Rt(devices[0].get(), lwhPolygon.polygon, GetScreenWidth(), GetScreenHeight()));
+		}
 		glm::mat4 proj, view;
 		GetCameraMatrix( camera, &proj, &view );
 		rt->setMatrixProjViewMatrix( proj, view );
 		rt->step();
-		CameraRayGenerator gg( view, proj, GetScreenWidth(), GetScreenHeight() );
-		glm::vec3 ro, rd;
-		gg.shoot( &ro, &rd, 0, 0 );
 
 		ClearBackground( rt->getTexture() );
 
