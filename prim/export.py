@@ -71,10 +71,6 @@ def exportObjGeometry(node):
         while( prim = iter.getPrimitive() )
         {
             int n = prim->getVertexCount();
-
-            // limit
-            if ( 3 < n ) { n = 3; }
-
             for(int i = 0 ; i < n ; ++i)
             {
                 ids.push_back(prim->getPointIndex(i));
