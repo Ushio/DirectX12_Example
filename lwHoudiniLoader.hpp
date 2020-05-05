@@ -21,6 +21,7 @@ namespace lwh {
 		glm::mat4 xform = glm::identity<glm::mat4>();
 		std::vector<glm::vec3> P;	   // Points
 		std::vector<uint32_t> indices; // Vertices
+		std::vector<uint32_t> indexPerPrim;
 
 		// meta
 		uint32_t pointCount = 0;
@@ -116,6 +117,7 @@ namespace lwh {
 		PR_ASSERT(Vertices.IsObject());
 
 		polygon->indices = GetMemberAsUIntegers(Vertices, "Point Num");
+		polygon->indexPerPrim = GetMemberAsUIntegers(Vertices, "Index Count");
 
 		// Point Attributes
 		{
@@ -160,7 +162,7 @@ namespace lwh {
 		}
 
 		{
-			uint32_t geometryCount = polygon->indices.size() / 3;
+			uint32_t primitiveCount = polygon->indices.size() / 3;
 			LWH_EXPECT(d.HasMember("Primitives"), "");
 			const rapidjson::Value& Primitives = d["Primitives"];
 			LWH_EXPECT(Primitives.IsObject(), "");
@@ -170,15 +172,16 @@ namespace lwh {
 				LWH_EXPECT(it->value.IsArray(), "");
 
 				// vector
-				if (geometryCount * 3 == it->value.Size())
+				if (primitiveCount * 3 == it->value.Size())
 				{
 					polygon->primitivesVectorAttrib[it->name.GetString()] = GetMemberAsVectors(Primitives, it->name.GetString());
 				}
-				else if (geometryCount == it->value.Size())
+				else if (primitiveCount == it->value.Size())
 				{
 
 				}
 			}
+			polygon->primitiveCount = polygon->indexPerPrim.size();
 		}
 		return polygon;
 	}
