@@ -488,7 +488,7 @@ public:
 	BufferObjectUAV( const BufferObjectUAV& ) = delete;
 	void operator=( const BufferObjectUAV& ) = delete;
 
-	BufferObjectUAV( ID3D12Device* device, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState )
+	BufferObjectUAV( ID3D12Device* device, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState, bool hasCounter = false, D3D12_RESOURCE_STATES counterInitialState = D3D12_RESOURCE_STATE_COPY_DEST )
 		: _bytes( std::max( bytes, 1LL ) ), _structureByteStride( structureByteStride )
 	{
 		HRESULT hr;
@@ -500,6 +500,23 @@ public:
 			nullptr,
 			IID_PPV_ARGS( _resource.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
+
+		if (hasCounter)
+		{
+			
+			hr = device->CreateCommittedResource(
+				&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+				D3D12_HEAP_FLAG_NONE /* I don't know */,
+				&CD3DX12_RESOURCE_DESC::Buffer(_bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+				counterInitialState,
+				nullptr,
+				IID_PPV_ARGS(_counterResource.getAddressOf()));
+			DX_ASSERT(hr == S_OK, "");
+			_counterUploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, sizeof(uint32_t) ) );
+			_counterUploader->map([](void* p) {
+				memset(p, sizeof(uint32_t), 0);
+			});
+		}
 	}
 	int64_t bytes() const
 	{
@@ -513,9 +530,21 @@ public:
 	{
 		return CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), from, to );
 	}
+	D3D12_RESOURCE_BARRIER resourceBarrierUAVCounter()
+	{
+		return CD3DX12_RESOURCE_BARRIER::UAV( _counterResource.get() );
+	}
+	D3D12_RESOURCE_BARRIER resourceBarrierTransitionCounter( D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to )
+	{
+		return CD3DX12_RESOURCE_BARRIER::Transition( _counterResource.get(), from, to );
+	}
 	ID3D12Resource* resource()
 	{
 		return _resource.get();
+	}
+	ID3D12Resource* counterResource()
+	{
+		return _counterResource.get();
 	}
 	void copyFrom( ID3D12GraphicsCommandList* commandList, UploaderObject* uploader )
 	{
@@ -533,6 +562,13 @@ public:
 			_resource.get(), 0,
 			_bytes );
 	}
+	void clearCounterValue( ID3D12GraphicsCommandList* commandList )
+	{
+		commandList->CopyBufferRegion(
+			_counterResource.get(), 0,
+			_counterUploader->resource(), 0,
+			sizeof( uint32_t ) );
+	}
 	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDescription() const
 	{
 		D3D12_UNORDERED_ACCESS_VIEW_DESC d = {};
@@ -541,6 +577,17 @@ public:
 		d.Buffer.FirstElement = 0;
 		d.Buffer.NumElements = _bytes / _structureByteStride;
 		d.Buffer.StructureByteStride = _structureByteStride;
+		d.Buffer.CounterOffsetInBytes = 0;
+		return d;
+	}
+	D3D12_UNORDERED_ACCESS_VIEW_DESC CounterUAVDescription() const
+	{
+		D3D12_UNORDERED_ACCESS_VIEW_DESC d = {};
+		d.Format = DXGI_FORMAT_UNKNOWN;
+		d.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+		d.Buffer.FirstElement = 0;
+		d.Buffer.NumElements = 1;
+		d.Buffer.StructureByteStride = sizeof(uint32_t);
 		d.Buffer.CounterOffsetInBytes = 0;
 		return d;
 	}
@@ -585,6 +632,8 @@ private:
 	int64_t _bytes;
 	int64_t _structureByteStride;
 	DxPtr<ID3D12Resource> _resource;
+	DxPtr<ID3D12Resource> _counterResource;
+	std::unique_ptr<UploaderObject> _counterUploader;
 };
 
 class ConstantBufferObject
@@ -690,7 +739,7 @@ public:
 		commandList->SetDescriptorHeaps( 1, heaps );
 		commandList->SetComputeRootDescriptorTable( 0, add( _bufferHeap->GetGPUDescriptorHandleForHeapStart(), _incrementUAV * _bufferHeapHead ) );
 	}
-	void u( ID3D12Device* device, int i, ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC uavdescription )
+	void u( ID3D12Device* device, int i, ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC uavdescription, ID3D12Resource* counterResource = nullptr )
 	{
 		bool found = false;
 		for ( DescriptorEntity e : _bufferDescriptorEntries )
@@ -698,7 +747,7 @@ public:
 			if ( e.type == 'u' && e.registerIndex == i )
 			{
 				found = true;
-				device->CreateUnorderedAccessView( resource, nullptr, &uavdescription, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
+				device->CreateUnorderedAccessView( resource, counterResource, &uavdescription, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
 				break;
 			}
 		}
