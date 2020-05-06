@@ -90,7 +90,6 @@ namespace lwh {
 		LWH_EXPECT(o.HasMember(key), "missing key");
 		const rapidjson::Value& vs = o[key];
 		LWH_EXPECT(vs.IsArray(), "type mismatch");
-		LWH_EXPECT(vs.Size() % 3 == 0, "type mismatch"); // xyz
 
 		values.reserve(vs.Size());
 		for (rapidjson::SizeType i = 0; i < vs.Size(); i++)
