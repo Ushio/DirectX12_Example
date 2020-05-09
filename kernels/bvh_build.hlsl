@@ -2,6 +2,8 @@
 #include "bvh.h"
 
 #define BIN_COUNT 16
+#define NUM_THREAD 128
+
 #define FLT_MAX          3.402823466e+38F        // max value
 
 #define SAH_AABB_COST 1.0f
@@ -71,7 +73,7 @@ void expand( inout Bin bin, Bin otherBin)
     bin.nElem += otherBin.nElem;
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(NUM_THREAD, 1, 1)]
 void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 {
     if(localID.x == 0)
@@ -97,7 +99,7 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         // store to bin
         float lowerBound = from_ordered(task.lower[axis]);
         float upperBound = from_ordered(task.upper[axis]);
-        for(int i = task.geomBeg ; i < task.geomEnd ; i += 64)
+        for(int i = task.geomBeg ; i < task.geomEnd ; i += NUM_THREAD)
         {
             // store bin
             int index = i + localID.x;
@@ -188,7 +190,7 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         }
 
         // straight copy indices
-        for(int i = task.geomBeg ; i < task.geomEnd ; i += 64)
+        for(int i = task.geomBeg ; i < task.geomEnd ; i += NUM_THREAD)
         {
             int index = i + localID.x;
             if (index < task.geomEnd )
@@ -249,7 +251,7 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         int nElem = task.geomEnd - task.geomBeg;
         float lowerBound = from_ordered(task.lower[splitAxis]);
         float upperBound = from_ordered(task.upper[splitAxis]);
-        for(int i = task.geomBeg ; i < task.geomEnd ; i += 64)
+        for(int i = task.geomBeg ; i < task.geomEnd ; i += NUM_THREAD)
         {
             int index = i + localID.x;
             if (index < task.geomEnd )

@@ -204,6 +204,7 @@ public:
 		} );
 		deviceObject->queueObject()->execute( computeCommandList.get() );
 		
+		pr::Stopwatch sw;
 		DownloaderObject counterDownloader( deviceObject->device(), sizeof(uint32_t) );
 		uint32_t taskCount = 1;
 		for (;;)
@@ -255,7 +256,7 @@ public:
 			//auto counter1 = bvhBuildTaskBuffers[1]->synchronizedDownloadCounter(deviceObject->device(), deviceObject->queueObject());
 			//auto indices = bvhElementIndicesBuffers[0]->synchronizedDownload<uint32_t>(deviceObject->device(), deviceObject->queueObject());
 			//std::sort(indices.begin(), indices.end());
-			printf("taskCount %d\n", taskCount);
+			// printf("taskCount %d\n", taskCount);
 
 			if (taskCount == 0)
 			{
@@ -263,7 +264,7 @@ public:
 			}
 			heap->clear();
 		}
-		printf("fin\n");
+		printf("bvh build %.3f ms\n", 1000.0 * sw.elapsed());
 		// nodes = bvhNodeBuffer->synchronizedDownload<BvhNode>(deviceObject->device(), deviceObject->queueObject());
 
 		computeCommandList->storeCommand([&](ID3D12GraphicsCommandList* commandList) {
