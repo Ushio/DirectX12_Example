@@ -111,12 +111,12 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
                 int bin_idx = clamp((int)(location_f * (float)BIN_COUNT), 0, BIN_COUNT - 1);
                 
                 // update bin AABB
-                InterlockedMin(bins[bin_idx].lower[0], bvhElements[iPrim].lower[0]);
-                InterlockedMax(bins[bin_idx].upper[0], bvhElements[iPrim].upper[0]);
-                InterlockedMin(bins[bin_idx].lower[1], bvhElements[iPrim].lower[1]);
-                InterlockedMax(bins[bin_idx].upper[1], bvhElements[iPrim].upper[1]);
-                InterlockedMin(bins[bin_idx].lower[2], bvhElements[iPrim].lower[2]);
-                InterlockedMax(bins[bin_idx].upper[2], bvhElements[iPrim].upper[2]);
+                for(int d = 0 ; d < 3 ; ++d)
+                {
+                    int shift_d = (d + localID.x) % 3; // avoid conflict
+                    InterlockedMin(bins[bin_idx].lower[shift_d], bvhElements[iPrim].lower[shift_d]);
+                    InterlockedMax(bins[bin_idx].upper[shift_d], bvhElements[iPrim].upper[shift_d]);
+                }
                 InterlockedAdd(bins[bin_idx].nElem, 1);
             }
         }
