@@ -199,7 +199,8 @@ project "BvhRayCaster"
     flags { "MultiProcessorCompile", "NoPCH" }
 
     -- Src
-    files { "main_rt_bvh.cpp", "EzDx.hpp", "lwHoudiniLoader.hpp" }
+    includedirs { "kernels/" }
+    files { "main_rt_bvh.cpp", "EzDx.hpp", "lwHoudiniLoader.hpp", "kernels/bvh.h" }
 
     -- directx
     dx()

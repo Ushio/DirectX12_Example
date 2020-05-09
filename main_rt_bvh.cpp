@@ -1,6 +1,7 @@
 ﻿#include "EzDx.hpp"
 #include "pr.hpp"
 #include "lwHoudiniLoader.hpp"
+#include "bvh.h"
 
 struct Arguments
 {
@@ -9,42 +10,6 @@ struct Arguments
 	int cb_pad0;
 	int cb_pad1;
 	float cb_inverseVP[16];
-};
-
-struct BuildTask
-{
-	int lower[3];
-	int upper[3];
-	int geomBeg;
-	int geomEnd;
-	int currentNode;
-};
-struct BvhElement
-{
-	int lower[3];
-	int upper[3];
-	float centeroid[3];
-};
-
-/*
-0 <= geomBeg : Leaf Node. childNode, lowerL, upperL, lowerR, upperR is undefined.
-geomBeg < 0  : Branch Node. geomBeg == -1, geomEnd == -1
-*/
-struct BvhNode
-{
-	// childNode  : left child
-	// childNode+1: right child
-	int childNode;
-
-	// AABBs
-	float lowerL[3];
-	float upperL[3];
-	float lowerR[3];
-	float upperR[3];
-
-	// Leaf
-	int geomBeg;
-	int geomEnd;
 };
 
 inline uint32_t as_uint32(float f) {
@@ -80,13 +45,6 @@ public:
 		colorRGBX8Buffer = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV( deviceObject->device(), _width * _height * sizeof( uint32_t ), sizeof( uint32_t ), D3D12_RESOURCE_STATE_COMMON ) );
 		downloader = std::unique_ptr<DownloaderObject>( new DownloaderObject( deviceObject->device(), _width * _height * sizeof( uint32_t ) ) );
 
-		compute = std::unique_ptr<ComputeObject>( new ComputeObject() );
-		compute->u( 0 );
-		compute->u( 1 );
-		compute->u( 2 );
-		compute->b( 0 );
-		compute->loadShaderAndBuild( deviceObject->device(), pr::GetDataPath( "linear_rt.cso" ).c_str() );
-
 		compute_bvh_firstTask = std::unique_ptr<ComputeObject>(new ComputeObject());
 		compute_bvh_firstTask->u(0);
 		compute_bvh_firstTask->u(1);
@@ -109,7 +67,15 @@ public:
 		compute_bvh_build->u(6);
 		compute_bvh_build->loadShaderAndBuild(deviceObject->device(), pr::GetDataPath("bvh_build.cso").c_str());
 
-		
+		compute_bvh_traverse = std::unique_ptr<ComputeObject>(new ComputeObject());
+		compute_bvh_traverse->u(0);
+		compute_bvh_traverse->u(1);
+		compute_bvh_traverse->u(2);
+		compute_bvh_traverse->u(3);
+		compute_bvh_traverse->u(4);
+		compute_bvh_traverse->b(0);
+		compute_bvh_traverse->loadShaderAndBuild(deviceObject->device(), pr::GetDataPath("bvh_traverse.cso").c_str());
+
 		_argument = std::unique_ptr<ConstantBufferObject>( new ConstantBufferObject( deviceObject->device(), sizeof( Arguments ), D3D12_RESOURCE_STATE_COMMON ) );
 
 		texture = std::unique_ptr<pr::ITexture>( pr::CreateTexture() );
@@ -298,26 +264,43 @@ public:
 			heap->clear();
 		}
 		printf("fin\n");
-		nodes = bvhNodeBuffer->synchronizedDownload<BvhNode>(deviceObject->device(), deviceObject->queueObject());
+		// nodes = bvhNodeBuffer->synchronizedDownload<BvhNode>(deviceObject->device(), deviceObject->queueObject());
 
 		computeCommandList->storeCommand([&](ID3D12GraphicsCommandList* commandList) {
 			// Update Argument
-			resourceBarrier(commandList, { _argument->resourceBarrierTransition(D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST) });
+			resourceBarrier( commandList, {_argument->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
 			Arguments arg = {};
 			arg.cb_width = _width;
 			arg.cb_height = _height;
-			memcpy(arg.cb_inverseVP, glm::value_ptr(glm::transpose(_inverseVP)), sizeof(_inverseVP));
+			memcpy( arg.cb_inverseVP, glm::value_ptr( glm::transpose( _inverseVP ) ), sizeof( _inverseVP ) );
 
-			_argument->upload(commandList, arg);
-			resourceBarrier(commandList, {
-				_argument->resourceBarrierTransition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON),
-			});
+			_argument->upload( commandList, arg );
 
-			resourceBarrier(commandList, { colorRGBX8Buffer->resourceBarrierTransition(D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE) });
-			colorRGBX8Buffer->copyTo(commandList, downloader.get());
-			resourceBarrier(commandList, { colorRGBX8Buffer->resourceBarrierTransition(D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON) });
+			resourceBarrier( commandList, {
+											  _argument->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ),
+										  } );
+			_timestamp->stampBeg( commandList, "BVH Traverse" );
 
-			_timestamp->resolve(commandList);
+			// Execute
+			compute_bvh_traverse->setPipelineState( commandList );
+			compute_bvh_traverse->setComputeRootSignature( commandList );
+			heap->startNextHeapAndAssign( commandList, compute_bvh_traverse->descriptorEnties() );
+			heap->u( deviceObject->device(), 0, colorRGBX8Buffer->resource(), colorRGBX8Buffer->UAVDescription() );
+			heap->u( deviceObject->device(), 1, vertexBuffer->resource(), vertexBuffer->UAVDescription() );
+			heap->u( deviceObject->device(), 2, indexBuffer->resource(), indexBuffer->UAVDescription() );
+			heap->u( deviceObject->device(), 3, bvhNodeBuffer->resource(), bvhNodeBuffer->UAVDescription() );
+			heap->u( deviceObject->device(), 4, bvhElementIndicesBuffers[0]->resource(), bvhElementIndicesBuffers[0]->UAVDescription() );
+			
+			heap->b( deviceObject->device(), 0, _argument->resource() );
+			compute_bvh_traverse->dispatch( commandList, dispatchsize( _width * _height, 64 ), 1, 1 );
+
+			_timestamp->stampEnd( commandList );
+
+			resourceBarrier( commandList, {colorRGBX8Buffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+			colorRGBX8Buffer->copyTo( commandList, downloader.get() );
+			resourceBarrier( commandList, {colorRGBX8Buffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
+
+			_timestamp->resolve( commandList );
 		});
 		deviceObject->queueObject()->execute(computeCommandList.get());
 
@@ -340,7 +323,7 @@ public:
 		//auto counter0 = bvhBuildTaskBuffers[0]->synchronizedDownloadCounter(deviceObject->device(), deviceObject->queueObject());
 		//auto counter1 = bvhBuildTaskBuffers[1]->synchronizedDownloadCounter(deviceObject->device(), deviceObject->queueObject());
 
-		printf("");
+		//printf("");
 		// glm::vec3 lower_gpu = glm::vec3(from_ordered(task[0].lower[0]), from_ordered(task[0].lower[1]), from_ordered(task[0].lower[2]));
 		// glm::vec3 upper_gpu = glm::vec3(from_ordered(task[0].upper[0]), from_ordered(task[0].upper[1]), from_ordered(task[0].upper[2]));
 		
@@ -389,10 +372,11 @@ private:
 
 	std::unique_ptr<CommandObject> computeCommandList;
 	std::unique_ptr<StackDescriptorHeapObject> heap;
-	std::unique_ptr<ComputeObject> compute;
+	
 	std::unique_ptr<ComputeObject> compute_bvh_element;
 	std::unique_ptr<ComputeObject> compute_bvh_build;
 	std::unique_ptr<ComputeObject> compute_bvh_firstTask;
+	std::unique_ptr<ComputeObject> compute_bvh_traverse;
 
 	std::unique_ptr<BufferObjectUAV> vertexBuffer;
 	std::unique_ptr<BufferObjectUAV> indexBuffer;
@@ -413,6 +397,10 @@ private:
 };
 void drawNode(const std::vector<BvhNode>& nodes, int node, int depth = 0)
 {
+	if (nodes.empty()) {
+		return;
+	}
+
 	if (0 <= nodes[node].geomBeg) {
 		// leaf
 		return;
@@ -507,7 +495,7 @@ int main()
 
 	double e = GetElapsedTime();
 
-	bool showWire = true;
+	bool showWire = false;
 
 	while ( pr::NextFrame() == false )
 	{

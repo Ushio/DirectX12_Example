@@ -1,46 +1,11 @@
 #include "helper.hlsl"
+#include "bvh.h"
 
 #define BIN_COUNT 16
 #define FLT_MAX          3.402823466e+38F        // max value
 
 #define SAH_AABB_COST 1.0f
 #define SAH_ELEM_COST 2.0f
-
-struct BuildTask 
-{
-    int lower[3];
-    int upper[3];
-    int geomBeg;
-    int geomEnd;
-    int currentNode;
-};
-struct BvhElement 
-{
-    int lower[3];
-    int upper[3];
-    float centeroid[3];
-};
-
-/*
-0 <= geomBeg : Leaf Node. childNode, lowerL, upperL, lowerR, upperR is undefined.
-geomBeg < 0  : Branch Node. geomBeg == -1, geomEnd == -1
-*/
-struct BvhNode
-{
-    // childNode  : left child
-    // childNode+1: right child
-    int childNode;
-
-    // AABBs
-    float lowerL[3];
-    float upperL[3];
-    float lowerR[3];
-    float upperR[3];
-
-    // Leaf
-    int geomBeg;
-    int geomEnd;
-};
 
 float surfaceArea(int lower[3], int upper[3]) {
     float3 l = float3(from_ordered(lower[0]), from_ordered(lower[1]), from_ordered(lower[2]));
@@ -68,23 +33,31 @@ RWStructuredBuffer<uint> bvhNodeCounter : register(u4);
 RWStructuredBuffer<uint> bvhElementIndicesIn : register(u5);
 RWStructuredBuffer<uint> bvhElementIndicesOut : register(u6);
 
-groupshared BuildTask task;
 struct Bin {
     // bin AABB
     int lower[3];
     int upper[3];
+
+    // element counter
     int nElem;
 };
+
+// Selected Task
+groupshared BuildTask task;
+
+// Binning
 groupshared Bin bins[BIN_COUNT];
 groupshared Bin summedBinsL[BIN_COUNT];
 groupshared Bin summedBinsR[BIN_COUNT];
 
+// Selected Split
 groupshared float splitSahMin;
 groupshared int splitAxis;
 groupshared int splitBinIndexBorder;
 groupshared Bin splitBinL;
 groupshared Bin splitBinR;
 
+// Reorder
 groupshared int splitLCounter;
 groupshared int splitRCounter;
 
