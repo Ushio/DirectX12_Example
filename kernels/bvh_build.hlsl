@@ -1,7 +1,7 @@
 #include "helper.hlsl"
 #include "bvh.h"
 
-#define BIN_COUNT 16
+#define BIN_COUNT 8
 #define NUM_THREAD 128
 
 #define FLT_MAX          3.402823466e+38F        // max value
@@ -16,13 +16,6 @@ float surfaceArea(int lower[3], int upper[3]) {
     return dot(size.xyz, size.yzx) * 2.0f;
 }
 
-uint numberOfElement(RWStructuredBuffer<BvhElement> xs)
-{
-	uint numStruct;
-	uint stride;
-	xs.GetDimensions( numStruct, stride );
-	return numStruct;
-}
 ConsumeStructuredBuffer<BuildTask> buildTasksIn : register(u0);
 AppendStructuredBuffer<BuildTask> buildTasksOut : register(u1);
 RWStructuredBuffer<BvhElement> bvhElements : register(u2);
@@ -180,7 +173,8 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
     splitRCounter = 0;
     GroupMemoryBarrierWithGroupSync();
 
-    if(splitAxis < 0)
+    float nonSplitSah = SAH_ELEM_COST * (task.geomEnd - task.geomBeg);
+    if(splitAxis < 0 || nonSplitSah < splitSahMin )
     {
         // Finish split
         if(localID.x == 0)
