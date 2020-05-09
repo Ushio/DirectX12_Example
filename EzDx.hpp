@@ -450,6 +450,7 @@ public:
 	~DownloaderObject()
 	{
 	}
+
 	void map( std::function<void( const void* p )> f )
 	{
 		D3D12_RANGE readrange = {0, _bytes};
@@ -501,21 +502,23 @@ public:
 			IID_PPV_ARGS( _resource.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
 
-		if (hasCounter)
+		if ( hasCounter )
 		{
-			
 			hr = device->CreateCommittedResource(
-				&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+				&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
 				D3D12_HEAP_FLAG_NONE /* I don't know */,
-				&CD3DX12_RESOURCE_DESC::Buffer(_bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+				&CD3DX12_RESOURCE_DESC::Buffer( sizeof( uint32_t ), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS ),
 				counterInitialState,
 				nullptr,
-				IID_PPV_ARGS(_counterResource.getAddressOf()));
-			DX_ASSERT(hr == S_OK, "");
-			_counterUploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, sizeof(uint32_t) ) );
-			_counterUploader->map([](void* p) {
-				memset(p, sizeof(uint32_t), 0);
-			});
+				IID_PPV_ARGS( _counterResource.getAddressOf() ) );
+			DX_ASSERT( hr == S_OK, "" );
+			_counterResource->SetName(L"Counter");
+
+			_counterUploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, sizeof( uint32_t ) * 2 ) );
+			_counterUploader->map( []( void* p ) {
+				uint32_t data[2] = {0, 1};
+				memcpy( p, data, sizeof( uint32_t ) * 2 );
+			} );
 		}
 	}
 	int64_t bytes() const
@@ -554,6 +557,14 @@ public:
 			uploader->resource(), 0,
 			_bytes );
 	}
+	void copyFrom( ID3D12GraphicsCommandList* commandList, UploaderObject* uploader, uint64_t dstOffset, uint64_t srcOffset, uint64_t bytes )
+	{
+		DX_ASSERT( bytes <= _bytes, "overflow" );
+		commandList->CopyBufferRegion(
+			_resource.get(), dstOffset,
+			uploader->resource(), srcOffset,
+			bytes );
+	}
 	void copyTo( ID3D12GraphicsCommandList* commandList, DownloaderObject* downloader )
 	{
 		DX_ASSERT( _bytes == downloader->bytes(), "Required the same number of bytes" );
@@ -562,12 +573,19 @@ public:
 			_resource.get(), 0,
 			_bytes );
 	}
-	void clearCounterValue( ID3D12GraphicsCommandList* commandList )
+	void setCounterValueZero(ID3D12GraphicsCommandList* commandList)
 	{
 		commandList->CopyBufferRegion(
 			_counterResource.get(), 0,
 			_counterUploader->resource(), 0,
-			sizeof( uint32_t ) );
+			sizeof(uint32_t));
+	}
+	void setCounterValueOne(ID3D12GraphicsCommandList* commandList)
+	{
+		commandList->CopyBufferRegion(
+			_counterResource.get(), 0,
+			_counterUploader->resource(), sizeof(uint32_t),
+			sizeof(uint32_t));
 	}
 	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDescription() const
 	{
@@ -623,6 +641,31 @@ public:
 
 		downloader.map( [&]( const void* p ) {
 			memcpy( output.data(), p, _bytes );
+		} );
+
+		return output;
+	}
+	uint32_t synchronizedDownloadCounter( ID3D12Device* device, QueueObject* queue )
+	{
+		CommandObject command( device, D3D12_COMMAND_LIST_TYPE_DIRECT );
+		DownloaderObject downloader( device, sizeof( uint32_t ) );
+
+		command.storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
+			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _counterResource.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+			commandList->CopyBufferRegion(
+				downloader.resource(), 0,
+				_counterResource.get(), 0,
+				sizeof( uint32_t ) );
+			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _counterResource.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
+		} );
+		queue->execute( &command );
+
+		std::shared_ptr<FenceObject> fence = queue->fence( device );
+		fence->wait();
+
+		uint32_t output;
+		downloader.map( [&]( const void* p ) {
+			memcpy( &output, p, sizeof( uint32_t ) );
 		} );
 
 		return output;
@@ -923,6 +966,30 @@ private:
 
 	DxPtr<ID3D12RootSignature> _signature;
 	DxPtr<ID3D12PipelineState> _pipelineState;
+};
+
+class IndirectDispatcher
+{
+public:
+	IndirectDispatcher( ID3D12Device* device )
+	{
+		D3D12_INDIRECT_ARGUMENT_DESC indirectArgDesc = {};
+		indirectArgDesc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+		D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
+		commandSignatureDesc.NodeMask = 0;
+		commandSignatureDesc.pArgumentDescs = &indirectArgDesc;
+		commandSignatureDesc.ByteStride = sizeof( D3D12_DISPATCH_ARGUMENTS );
+		commandSignatureDesc.NumArgumentDescs = 1;
+		HRESULT hr = device->CreateCommandSignature( &commandSignatureDesc, nullptr, IID_PPV_ARGS( _commandSignature.getAddressOf() ) );
+		DX_ASSERT( hr == S_OK, "" );
+	}
+	void dispatch( ID3D12GraphicsCommandList* commandList, ID3D12Resource* argumentBuffer )
+	{
+		commandList->ExecuteIndirect( _commandSignature.get(), 1, argumentBuffer, 0, nullptr, 0 );
+	}
+
+private:
+	DxPtr<ID3D12CommandSignature> _commandSignature;
 };
 
 struct TimestampSpan
