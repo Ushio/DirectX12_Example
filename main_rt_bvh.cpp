@@ -269,7 +269,7 @@ public:
 
 		computeCommandList->storeCommand([&](ID3D12GraphicsCommandList* commandList) {
 			// Update Argument
-			resourceBarrier( commandList, {_argument->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+			resourceBarrier( commandList, {_argument->resourceBarrierTransition( D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST )} );
 			Arguments arg = {};
 			arg.cb_width = _width;
 			arg.cb_height = _height;
