@@ -110,14 +110,14 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 
     GroupMemoryBarrierWithGroupSync();
 
+    // inclusive scan LR for each axis
     if(localID.x < 3)
     {
         int axis = localID.x;
 
         int i;
         Bin b;
-
-        // inclusive scan LR
+        
         b = bins[axis][0];
         for( i = 0 ; i < BIN_COUNT - 1 ; ++i)
         {
