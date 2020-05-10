@@ -1,13 +1,8 @@
 #include "helper.hlsl"
 #include "bvh.h"
 
-#define BIN_COUNT 8
-#define NUM_THREAD 128
-
 #define FLT_MAX          3.402823466e+38F        // max value
-
-#define SAH_AABB_COST 1.0f
-#define SAH_ELEM_COST 2.0f
+#define NUM_THREAD 128
 
 float surfaceArea(int lower[3], int upper[3]) {
     float3 l = float3(from_ordered(lower[0]), from_ordered(lower[1]), from_ordered(lower[2]));
@@ -28,22 +23,13 @@ RWStructuredBuffer<uint> bvhNodeCounter : register(u4);
 RWStructuredBuffer<uint> bvhElementIndicesIn : register(u5);
 RWStructuredBuffer<uint> bvhElementIndicesOut : register(u6);
 
-struct Bin {
-    // bin AABB
-    int lower[3];
-    int upper[3];
-
-    // element counter
-    int nElem;
-};
-
 // Selected Task
 groupshared BuildTask task;
 
-// Binning
-groupshared Bin bins[BIN_COUNT];
-groupshared Bin summedBinsL[BIN_COUNT];
-groupshared Bin summedBinsR[BIN_COUNT];
+// Binning per axis
+groupshared Bin bins[3][BIN_COUNT];
+groupshared Bin summedBinsL[3][BIN_COUNT];
+groupshared Bin summedBinsR[3][BIN_COUNT];
 
 // Selected Split
 groupshared float splitSahMin;
@@ -77,72 +63,88 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
     splitSahMin = FLT_MAX;
     splitAxis = -1;
 
-    for( int axis = 0 ; axis < 3 ; ++axis )
-    {
-        // clear bin
-        if(localID.x < BIN_COUNT) {
+    // clear bin
+    if(localID.x < BIN_COUNT) {
+        for(int j = 0 ; j < 3 ; ++j) {
             for(int i = 0 ; i < 3 ; ++i) {
-                bins[localID.x].lower[i] = to_ordered(+FLT_MAX);
-                bins[localID.x].upper[i] = to_ordered(-FLT_MAX);
+                bins[j][localID.x].lower[i] = to_ordered(+FLT_MAX);
+                bins[j][localID.x].upper[i] = to_ordered(-FLT_MAX);
             }
-            bins[localID.x].nElem = 0;
+            bins[j][localID.x].nElem = 0;
         }
-        GroupMemoryBarrierWithGroupSync();
+    }
+    GroupMemoryBarrierWithGroupSync();
 
-        // store to bin
-        float lowerBound = from_ordered(task.lower[axis]);
-        float upperBound = from_ordered(task.upper[axis]);
-        for(int i = task.geomBeg ; i < task.geomEnd ; i += NUM_THREAD)
+    // store to bin
+    float3 lowerBound = float3( from_ordered(task.lower[0]), from_ordered(task.lower[1]), from_ordered(task.lower[2]) );
+    float3 upperBound = float3( from_ordered(task.upper[0]), from_ordered(task.upper[1]), from_ordered(task.upper[2]) );
+    for(int i = task.geomBeg ; i < task.geomEnd ; i += NUM_THREAD)
+    {
+        // store bin
+        int index = i + localID.x;
+        if( index < task.geomEnd)
         {
-            // store bin
-            int index = i + localID.x;
-            if( index < task.geomEnd)
+            uint iPrim = bvhElementIndicesIn[ index ];
+            BvhElement element = bvhElements[iPrim];
+            float3 x = float3(element.centeroid[0], element.centeroid[1], element.centeroid[2]);
+            float3 location_f = (x - lowerBound) / (upperBound - lowerBound);
+            int3 bin_idx = clamp((int3)(location_f * (float)BIN_COUNT), int3(0, 0, 0), int3(BIN_COUNT - 1, BIN_COUNT - 1, BIN_COUNT - 1));
+            
+            // update bin AABB
+            for(int d = 0 ; d < 3 ; ++d)
             {
-                uint iPrim = bvhElementIndicesIn[ index ];
-                float x = bvhElements[iPrim].centeroid[axis];
-                float location_f = (x - lowerBound) / (upperBound - lowerBound);
-                int bin_idx = clamp((int)(location_f * (float)BIN_COUNT), 0, BIN_COUNT - 1);
-                
-                // update bin AABB
-                for(int d = 0 ; d < 3 ; ++d)
-                {
-                    int shift_d = (d + localID.x) % 3; // avoid conflict
-                    InterlockedMin(bins[bin_idx].lower[shift_d], bvhElements[iPrim].lower[shift_d]);
-                    InterlockedMax(bins[bin_idx].upper[shift_d], bvhElements[iPrim].upper[shift_d]);
-                }
-                InterlockedAdd(bins[bin_idx].nElem, 1);
+                int shift_d = (d + localID.x) % 3; // avoid conflict
+                InterlockedMin(bins[0][bin_idx.x].lower[shift_d], bvhElements[iPrim].lower[shift_d]);
+                InterlockedMax(bins[0][bin_idx.x].upper[shift_d], bvhElements[iPrim].upper[shift_d]);
+                InterlockedMin(bins[1][bin_idx.y].lower[shift_d], bvhElements[iPrim].lower[shift_d]);
+                InterlockedMax(bins[1][bin_idx.y].upper[shift_d], bvhElements[iPrim].upper[shift_d]);
+                InterlockedMin(bins[2][bin_idx.z].lower[shift_d], bvhElements[iPrim].lower[shift_d]);
+                InterlockedMax(bins[2][bin_idx.z].upper[shift_d], bvhElements[iPrim].upper[shift_d]);
             }
+
+            InterlockedAdd(bins[0][bin_idx.x].nElem, 1);
+            InterlockedAdd(bins[1][bin_idx.y].nElem, 1);
+            InterlockedAdd(bins[2][bin_idx.z].nElem, 1);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if(localID.x < 3)
+    {
+        int axis = localID.x;
+
+        int i;
+        Bin b;
+
+        // inclusive scan LR
+        b = bins[axis][0];
+        for( i = 0 ; i < BIN_COUNT - 1 ; ++i)
+        {
+            int index = i;
+            summedBinsL[axis][index] = b;
+            expand(b, bins[axis][index + 1]);
         }
 
-        GroupMemoryBarrierWithGroupSync();
-        if(localID.x == 0)
+        b = bins[axis][BIN_COUNT - 1];
+        for( i = 0 ; i < BIN_COUNT - 1 ; ++i)
         {
-            int i;
-            Bin b;
-
-            // inclusive scan LR
-            b = bins[0];
-            for( i = 0 ; i < BIN_COUNT - 1 ; ++i)
-            {
-                int index = i;
-                summedBinsL[index] = b;
-                expand(b, bins[index + 1]);
-            }
-
-            b = bins[BIN_COUNT - 1];
-            for( i = 0 ; i < BIN_COUNT - 1 ; ++i)
-            {
-                int r_index = BIN_COUNT - 1 - i;
-                summedBinsR[r_index] = b;
-                expand(b, bins[r_index - 1]);
-            }
-
+            int r_index = BIN_COUNT - 1 - i;
+            summedBinsR[axis][r_index] = b;
+            expand(b, bins[axis][r_index - 1]);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    
+    if(localID.x == 0)
+    {
+        for( int axis = 0 ; axis < 3 ; ++axis ) {
             // L [x---]
             // R [-xxx]
             for(i = 0 ; i < BIN_COUNT - 1 ; ++i)
             {
-                Bin L = summedBinsL[i];
-                Bin R = summedBinsR[i + 1];
+                Bin L = summedBinsL[axis][i];
+                Bin R = summedBinsR[axis][i + 1];
 
                 if(0 == L.nElem || 0 == R.nElem) {
                     continue;

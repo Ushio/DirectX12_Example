@@ -1,6 +1,11 @@
 #ifndef __BVH_H__
 #define __BVH_H__
 
+#define BIN_COUNT 8
+
+#define SAH_AABB_COST 1.0f
+#define SAH_ELEM_COST 2.0f
+
 struct BuildTask 
 {
     int lower[3];
@@ -35,6 +40,20 @@ struct BvhNode
     // Leaf
     int geomBeg;
     int geomEnd;
+};
+
+struct Bin {
+    // bin AABB
+    int lower[3];
+    int upper[3];
+
+    // element counter
+    int nElem;
+};
+
+struct PrecomputedBin
+{
+    Bin bins[3][BIN_COUNT];
 };
 
 #endif
