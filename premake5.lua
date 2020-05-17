@@ -230,3 +230,44 @@ project "BvhRayCaster"
         targetname ("BvhRayCaster")
         optimize "Full"
     filter{}
+
+
+project "ParallelBvhRayCaster"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "bin/"
+    systemversion "latest"
+    flags { "MultiProcessorCompile", "NoPCH" }
+
+    -- Src
+    includedirs { "kernels/" }
+    files { "main_rt_pbvh.cpp", "EzDx.hpp", "lwHoudiniLoader.hpp", "kernels/bvh.h" }
+
+    -- directx
+    dx()
+
+    -- Helper
+    files { "libs/dxhelper/*.h" }
+    includedirs { "libs/dxhelper/" }
+
+    -- rapidjson
+    includedirs { "libs/rapidjson/include" }
+    files { "libs/rapidjson/include/**.h" }
+
+    -- prlib
+    prlib()
+
+    -- pix
+    pix( true )
+    
+    symbols "On"
+
+    filter {"Debug"}
+        runtime "Debug"
+        targetname ("ParallelBvhRayCaster_Debug")
+        optimize "Off"
+    filter {"Release"}
+        runtime "Release"
+        targetname ("ParallelBvhRayCaster")
+        optimize "Full"
+    filter{}

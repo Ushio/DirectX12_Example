@@ -3,6 +3,8 @@
 
 #define BIN_COUNT 8
 
+#define EXECUTION_BATCH_COUNT 64
+
 #define SAH_AABB_COST 1.0f
 #define SAH_ELEM_COST 2.0f
 
@@ -51,9 +53,18 @@ struct Bin {
     int nElem;
 };
 
-struct PrecomputedBin
+struct BinningBuffer
 {
+    BuildTask task;
+    
+    int iProcess;
     Bin bins[3][BIN_COUNT];
+    
+    int splitAxis;
+    int splitBinIndexBorder; // bin_idx < splitBinIndexBorder is left, otherwise right
+    
+    int splitLCounter;
+    int splitRCounter;
 };
 
 #endif

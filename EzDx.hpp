@@ -320,6 +320,7 @@ public:
 		hr = _device->CheckFeatureSupport( D3D12_FEATURE_D3D12_OPTIONS1, &option1, sizeof( option1 ) );
 		DX_ASSERT( hr == S_OK, "" );
 		_waveLaneCount = option1.WaveLaneCountMin;
+		_totalLaneCount = option1.TotalLaneCount;
 
 		_queue = std::shared_ptr<QueueObject>( new QueueObject( _device.get(), D3D12_COMMAND_LIST_TYPE_DIRECT, "Compute" ) );
 
@@ -357,19 +358,23 @@ public:
 		std::shared_ptr<FenceObject> fence = _queue->fence( _device.get() );
 		fence->wait();
 	}
-	std::wstring deviceName()
+	std::wstring deviceName() const
 	{
 		return _deviceName;
 	}
-	int waveLaneCount()
+	int waveLaneCount() const
 	{
 		return _waveLaneCount;
 	}
-
+	int totalLaneCount() const
+	{
+		return _totalLaneCount;
+	}
 private:
 	std::wstring _deviceName;
 	std::string _highestShaderModel;
 	int _waveLaneCount = 0;
+	int _totalLaneCount = 0;
 	DxPtr<ID3D12Device> _device;
 	std::shared_ptr<QueueObject> _queue;
 	DxPtr<IDXGISwapChain1> _swapchain;
@@ -525,6 +530,10 @@ public:
 	{
 		return _bytes;
 	}
+	int64_t itemCount() const
+	{
+		return _bytes / _structureByteStride;
+	}
 	D3D12_RESOURCE_BARRIER resourceBarrierUAV()
 	{
 		return CD3DX12_RESOURCE_BARRIER::UAV( _resource.get() );
@@ -557,12 +566,12 @@ public:
 			uploader->resource(), 0,
 			_bytes );
 	}
-	void copyFrom( ID3D12GraphicsCommandList* commandList, UploaderObject* uploader, uint64_t dstOffset, uint64_t srcOffset, uint64_t bytes )
+	void copyFrom( ID3D12GraphicsCommandList* commandList, ID3D12Resource* src, uint64_t dstOffset, uint64_t srcOffset, uint64_t bytes )
 	{
 		DX_ASSERT( bytes <= _bytes, "overflow" );
 		commandList->CopyBufferRegion(
 			_resource.get(), dstOffset,
-			uploader->resource(), srcOffset,
+			src, srcOffset,
 			bytes );
 	}
 	void copyTo( ID3D12GraphicsCommandList* commandList, DownloaderObject* downloader )
@@ -869,6 +878,13 @@ public:
 		entity.registerIndex = i;
 		entity.descriptorHeapIndex = (int)_bufferDescriptorEntries.size();
 		_bufferDescriptorEntries.push_back( entity );
+	}
+	void uRange( int begIndex, int endIndex)
+	{
+		for (int i = begIndex; i < endIndex; ++i)
+		{
+			u(i);
+		}
 	}
 	void b( int i )
 	{

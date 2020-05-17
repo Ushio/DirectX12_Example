@@ -26,9 +26,10 @@ struct ScanGlobalArgument
 
 static uint32_t prefixScanIterationCount( uint32_t n )
 {
-	DX_ASSERT( n, "n can't be 0" );
-	unsigned long index = 0;
-	_BitScanReverse( &index, n );
+	if (n <= 1) { return 0; }
+
+	unsigned long index;
+	_BitScanReverse(&index, n - 1);
 	return index + 1;
 }
 

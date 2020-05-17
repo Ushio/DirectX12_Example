@@ -170,7 +170,7 @@ public:
 			bvhBuildTaskBuffers[1]->setCounterValueZero( commandList );
 
 			// Task Initialize
-			bvhBuildTaskBuffers[0]->copyFrom( commandList, firstTaskUploader.get(), 0, 0, sizeof( BuildTask ) );
+			bvhBuildTaskBuffers[0]->copyFrom( commandList, firstTaskUploader->resource(), 0, 0, sizeof( BuildTask ) );
 
 			resourceBarrier(commandList, { 
 				bvhElementBuffer->resourceBarrierUAV(),
