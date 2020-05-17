@@ -33,8 +33,6 @@ RWStructuredBuffer<BinningBuffer> binningBuffer : register(u2);
 RWStructuredBuffer<BvhNode> bvhNodes : register(u3);
 RWStructuredBuffer<uint> bvhNodeCounter : register(u4);
 
-RWStructuredBuffer<uint> debugBuffer : register(u5);
-
 groupshared uint s_taskCounter;
 groupshared uint s_taskCounterBase;
 
@@ -162,8 +160,6 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         // no split
         bvhNodes[task.currentNode].geomBeg = task.geomBeg;
         bvhNodes[task.currentNode].geomEnd = task.geomEnd;
-
-        debugBuffer[gID.x] = -1;
     }
     else 
     {
@@ -199,7 +195,6 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         }
         buildTasksOut[lTaskIndex] = lTask;
         buildTasksOut[lTaskIndex].currentNode = childnode;
-        // buildTasksOut.Append(lTask);
 
         BuildTask rTask;
         rTask.geomBeg = task.geomBeg + splitBinL.nElem;
@@ -211,8 +206,5 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
             rTask.upper[axis] = splitBinR.upper[axis];
         }
         buildTasksOut[rTaskIndex] = rTask;
-
-        debugBuffer[gID.x] = lrTaskIndex;
-        // buildTasksOut.Append(rTask);
     }
 }

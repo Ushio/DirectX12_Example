@@ -57,12 +57,11 @@ struct BinningBuffer
 {
     BuildTask task;
     
-    int iProcess;
     Bin bins[3][BIN_COUNT];
     
     int splitAxis;
     int splitBinIndexBorder; // bin_idx < splitBinIndexBorder is left, otherwise right
-    
+
     int splitLCounter;
     int splitRCounter;
 };

@@ -106,6 +106,49 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 
                 bvhElementIndicesOut[ to_index ] = iPrim;
             }
+
+            // bool addL = false;
+            // bool addR = false;
+            // uint iPrim = 0;
+            // if( index < task.geomEnd )
+            // {
+            //     iPrim = bvhElementIndicesIn[ index ];
+            //     float x = bvhElements[iPrim].centeroid[splitAxis];
+            //     float location_f = (x - lowerBound) / (upperBound - lowerBound);
+            //     int bin_idx = clamp((int)(location_f * (float)BIN_COUNT), 0, BIN_COUNT - 1);
+                
+            //     if(bin_idx < splitBinIndexBorder)
+            //     {
+            //         addL = true;
+            //     }
+            //     else
+            //     {
+            //         addR = true;
+            //     }
+            // }
+            // int lidx = WavePrefixCountBits(addL);
+            // int ridx = WavePrefixCountBits(addR);
+            // int ln = WaveActiveCountBits(addL);
+            // int rn = WaveActiveCountBits(addR);
+            // int lBase = 0;
+            // int rBase = 0;
+            // if( WaveIsFirstLane() )
+            // {
+            //     InterlockedAdd(binningBuffer[iBinningBuffer].splitLCounter, ln, lBase);
+            //     InterlockedAdd(binningBuffer[iBinningBuffer].splitRCounter, rn, rBase);
+            // }
+            // lBase = WaveReadLaneFirst(lBase);
+            // rBase = WaveReadLaneFirst(rBase);
+            // if( addL )
+            // {
+            //     int to_index = task.geomBeg + lBase + lidx;
+            //     bvhElementIndicesOut[ to_index ] = iPrim;
+            // }
+            // else if( addR )
+            // {
+            //     int to_index = task.geomBeg + nElem - (rBase + ridx) - 1;
+            //     bvhElementIndicesOut[ to_index ] = iPrim;
+            // }
         }
     }
 }

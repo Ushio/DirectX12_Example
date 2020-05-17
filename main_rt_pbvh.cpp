@@ -110,6 +110,7 @@ public:
 		compute_bvh_scan->u(0);
 		compute_bvh_scan->u(1);
 		compute_bvh_scan->b(0);
+		compute_bvh_scan->b(1);
 		compute_bvh_scan->loadShaderAndBuild(deviceObject->device(), pr::GetDataPath("bvh_scan.cso").c_str());
 
 		compute_bvh_clearBin = std::unique_ptr<ComputeObject>(new ComputeObject());
@@ -118,6 +119,12 @@ public:
 		compute_bvh_clearBin->u(1);
 		compute_bvh_clearBin->u(2);
 		compute_bvh_clearBin->loadShaderAndBuild(deviceObject->device(), pr::GetDataPath("bvh_clearBin.cso").c_str());
+
+		compute_bvh_consumeTask = std::unique_ptr<ComputeObject>(new ComputeObject());
+		compute_bvh_consumeTask->b(0);
+		compute_bvh_consumeTask->u(0);
+		compute_bvh_consumeTask->u(1);
+		compute_bvh_consumeTask->loadShaderAndBuild(deviceObject->device(), pr::GetDataPath("bvh_consumeTask.cso").c_str());
 
 		compute_bvh_binning = std::unique_ptr<ComputeObject>(new ComputeObject());
 		compute_bvh_binning->b(0);
@@ -136,7 +143,6 @@ public:
 		compute_bvh_selectBin->u(2);
 		compute_bvh_selectBin->u(3);
 		compute_bvh_selectBin->u(4);
-		compute_bvh_selectBin->u(5);
 		compute_bvh_selectBin->loadShaderAndBuild(deviceObject->device(), pr::GetDataPath("bvh_selectBin.cso").c_str());
 
 		compute_bvh_reorder = std::unique_ptr<ComputeObject>(new ComputeObject());
@@ -192,10 +198,12 @@ public:
 
 	void step()
 	{
+		pr::Stopwatch sw;
+
 		DeviceObject* deviceObject = _deviceObject;
 
 		// int nProcessBlocks = std::max( 10 * deviceObject->totalLaneCount(), 1024 );
-		int nProcessBlocks = 1024 * 128;
+		int nProcessBlocks = 1024 * 64;
 
 		heap->clear();
 		_timestamp->clear();
@@ -253,9 +261,6 @@ public:
 			memcpy(p, &one, sizeof(uint32_t));
 		});
 
-		// 
-		std::unique_ptr<BufferObjectUAV> debugBuffer(new BufferObjectUAV(deviceObject->device(), nProcessBlocks * sizeof(uint32_t), sizeof(uint32_t), D3D12_RESOURCE_STATE_COMMON));
-		
 		computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 			// Calculate AABB for each element
 			_timestamp->stampBeg(commandList, "bvh element");
@@ -306,14 +311,29 @@ public:
 		
 		ConstantBufferObject binningArgument( deviceObject->device(), sizeof(uint32_t), D3D12_RESOURCE_STATE_COMMON );
 
-		pr::Stopwatch sw;
+		
 		DownloaderObject ringRangesDownloader(deviceObject->device(), sizeof(uint32_t) * 4 );
 
+		// Setup Scan Args
 		std::vector<std::unique_ptr<ConstantBufferObject>> scanArgs( prefixScanIterationCount( nProcessBlocks ) );
 		for (int i = 0; i < scanArgs.size() ; ++i)
 		{
-			scanArgs[i] = std::unique_ptr<ConstantBufferObject>(new ConstantBufferObject(deviceObject->device(), sizeof(BvhScanArgument), D3D12_RESOURCE_STATE_COPY_DEST));
+			scanArgs[i] = std::unique_ptr<ConstantBufferObject>(new ConstantBufferObject(deviceObject->device(), sizeof(int32_t), D3D12_RESOURCE_STATE_COPY_DEST));
 		}
+		computeCommandList->storeCommand([&](ID3D12GraphicsCommandList* commandList) {
+			std::vector<D3D12_RESOURCE_BARRIER> barriers;
+
+			for ( int i = 0; i < scanArgs.size(); ++i )
+			{
+				int32_t offset = 1 << i;
+				scanArgs[i]->upload( commandList, offset );
+				barriers.push_back( scanArgs[i]->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ) );
+			}
+
+			resourceBarrier( commandList, barriers );
+		});
+		deviceObject->queueObject()->execute( computeCommandList.get() );
+
 
 		UploaderObject zeroU32(deviceObject->device(), sizeof(uint32_t));
 		zeroU32.map([](void* p) { memset(p, 0, sizeof(uint32_t)); });
@@ -345,7 +365,18 @@ public:
 				compute_bvh_clearBin->dispatch( commandList, dispatchsize( consumeTaskCount, 64 ), 1, 1 );
 
 				resourceBarrier(commandList, {
-					binningBuffer->resourceBarrierUAV(),
+					bvhBuildTaskRingRanges[0]->resourceBarrierUAV()
+				});
+
+				compute_bvh_consumeTask->setPipelineState(commandList);
+				compute_bvh_consumeTask->setComputeRootSignature(commandList);
+				heap->startNextHeapAndAssign(commandList, compute_bvh_consumeTask->descriptorEnties());
+				heap->b(deviceObject->device(), 0, binningArgument.resource());
+				heap->u(deviceObject->device(), 0, bvhBuildTaskBuffer->resource(), bvhBuildTaskBuffer->UAVDescription());
+				heap->u(deviceObject->device(), 1, bvhBuildTaskRingRanges[0]->resource(), bvhBuildTaskRingRanges[0]->UAVDescription());
+				compute_bvh_consumeTask->dispatch(commandList, 1, 1, 1);
+
+				resourceBarrier(commandList, {
 					bvhBuildTaskRingRanges[0]->resourceBarrierUAV()
 				});
 
@@ -362,27 +393,11 @@ public:
 					executionCountBuffer->resourceBarrierTransition(D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
 				});
 
-				// Scan Parameters
-				for (int i = 0; i < nScanIteration; ++i)
-				{
-					BvhScanArgument sa = {};
-					sa.nElement = consumeTaskCount;
-					sa.offset = 1 << i;
-					scanArgs[i]->upload( commandList, sa );
-				}
-
 				// Scan Preapre for exclusive scan
 				executionTableBuffers[0]->copyFrom( commandList, zeroU32.resource(), 0, 0, sizeof(uint32_t) );
 				executionTableBuffers[0]->copyFrom( commandList, executionCountBuffer->resource(), sizeof(uint32_t), 0, sizeof(uint32_t) * (consumeTaskCount - 1) );
 				
-				{
-					std::vector<D3D12_RESOURCE_BARRIER> barriers = { executionCountBuffer->resourceBarrierUAV() };
-					for (int i = 0; i < nScanIteration; ++i)
-					{
-						barriers.push_back( scanArgs[i]->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ) );
-					}
-					resourceBarrier(commandList, barriers);
-				}
+				resourceBarrier( commandList, {executionCountBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
 
 				PIXBeginEvent(commandList, PIX_COLOR_DEFAULT, "Scan");
 				// _timestamp->stampBeg(commandList, "Scan");
@@ -392,7 +407,8 @@ public:
 					compute_bvh_scan->setPipelineState(commandList);
 					compute_bvh_scan->setComputeRootSignature(commandList);
 					heap->startNextHeapAndAssign(commandList, compute_bvh_scan->descriptorEnties());
-					heap->b(deviceObject->device(), 0, scanArgs[i]->resource());
+					heap->b(deviceObject->device(), 0, binningArgument.resource());
+					heap->b(deviceObject->device(), 1, scanArgs[i]->resource());
 					heap->u(deviceObject->device(), 0, executionTableBuffers[0]->resource(), executionTableBuffers[0]->UAVDescription());
 					heap->u(deviceObject->device(), 1, executionTableBuffers[1]->resource(), executionTableBuffers[1]->UAVDescription());
 					compute_bvh_scan->dispatch(commandList, dispatchsize(consumeTaskCount, 64), 1, 1);
@@ -442,8 +458,6 @@ public:
 				heap->u(deviceObject->device(), 2, binningBuffer->resource(), binningBuffer->UAVDescription());
 				heap->u(deviceObject->device(), 3, bvhNodeBuffer->resource(), bvhNodeBuffer->UAVDescription());
 				heap->u(deviceObject->device(), 4, bvhNodeCounterBuffer->resource(), bvhNodeCounterBuffer->UAVDescription());
-
-				heap->u(deviceObject->device(), 5, debugBuffer->resource(), debugBuffer->UAVDescription());
 				compute_bvh_selectBin->dispatch(commandList, dispatchsize(consumeTaskCount, 64), 1, 1);
 				PIXEndEvent(commandList);
 
@@ -518,6 +532,7 @@ public:
 			//auto binningBufferValue = binningBuffer->synchronizedDownload<BinningBuffer>(deviceObject->device(), deviceObject->queueObject());
 			//auto taks = bvhBuildTaskBuffer->synchronizedDownload<BuildTask>(deviceObject->device(), deviceObject->queueObject());
 			//auto idx = bvhElementIndicesBuffers[1]->synchronizedDownload<uint32_t>(deviceObject->device(), deviceObject->queueObject());
+			//printf("");
 			//nodes = bvhNodeBuffer->synchronizedDownload<BvhNode>(deviceObject->device(), deviceObject->queueObject());
 			//auto nodeCounter = bvhNodeCounterBuffer->synchronizedDownload<uint32_t>(deviceObject->device(), deviceObject->queueObject());
 			//auto debugValue = debugBuffer->synchronizedDownload<uint32_t>(deviceObject->device(), deviceObject->queueObject());
@@ -721,6 +736,7 @@ private:
 	std::unique_ptr<ComputeObject> compute_bvh_executionCount;
 	std::unique_ptr<ComputeObject> compute_bvh_scan;
 	std::unique_ptr<ComputeObject> compute_bvh_clearBin;
+	std::unique_ptr<ComputeObject> compute_bvh_consumeTask;
 	std::unique_ptr<ComputeObject> compute_bvh_binning;
 	std::unique_ptr<ComputeObject> compute_bvh_selectBin;
 	std::unique_ptr<ComputeObject> compute_bvh_reorder;

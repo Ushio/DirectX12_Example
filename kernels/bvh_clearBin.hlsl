@@ -23,27 +23,9 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
     uint nBinningBuffer;
     binningBuffer.GetDimensions( nBinningBuffer, stride );
 
-    // Consume Tasks
-    uint nTake = WaveActiveCountBits( gID.x < consumeTaskCount );
-    uint iBaseGlobal = -1;
-    if( WaveIsFirstLane() )
-    {
-        uint expect;
-        uint newValue;
-        uint curValue;
-        do {
-            expect = buildTaskRingRange[0];
-            newValue = (expect + nTake) % nRingBuffer;
-            InterlockedCompareExchange( buildTaskRingRange[0], expect, newValue, curValue );
-        } while( expect != curValue );
+    uint iGlobal = ( buildTaskRingRange[0] + gID.x ) % nRingBuffer;
 
-        iBaseGlobal = curValue;
-    }
-    iBaseGlobal = WaveReadLaneFirst(iBaseGlobal);
-    uint iGlobal = (iBaseGlobal + WaveGetLaneIndex()) % nRingBuffer;
-
-    // it's not perfect tight but ok.
-    if( nBinningBuffer <= gID.x )
+    if( consumeTaskCount <= gID.x )
     {
         return;
     }
@@ -52,7 +34,6 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
     int upper = to_ordered(-FLT_MAX);
     BinningBuffer buffer;
     buffer.task = buildTasks[iGlobal];
-    buffer.iProcess = 0;
     for(int k = 0 ; k < BIN_COUNT ; ++k) {
         for(int j = 0 ; j < 3 ; ++j) {
             for(int i = 0 ; i < 3 ; ++i) {

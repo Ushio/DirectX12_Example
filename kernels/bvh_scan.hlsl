@@ -1,8 +1,11 @@
 #include "helper.hlsl"
 
-cbuffer BvhScanArgument : register(b0, space0)
+cbuffer BinningArgument : register(b0, space0)
 {
-	int nElement;
+	int consumeTaskCount;
+};
+cbuffer BvhScanArgument : register(b1, space0)
+{
 	int offset;
 };
 
@@ -12,7 +15,7 @@ RWStructuredBuffer<uint> scanTable1 : register(u1);
 [numthreads(64, 1, 1)]
 void main(uint3 gID : SV_DispatchThreadID)
 {
-	if( nElement <= gID.x )
+	if( consumeTaskCount <= gID.x )
 	{
 		return;
 	}

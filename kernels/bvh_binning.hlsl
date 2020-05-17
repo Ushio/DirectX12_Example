@@ -114,10 +114,6 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         GroupMemoryBarrierWithGroupSync();
 
         // store global
-        if( localID.x == 0)
-        {
-            InterlockedAdd(binningBuffer[iBinningBuffer].iProcess, 1);
-        }
         if(localID.x < BIN_COUNT) {
             for(int j = 0 ; j < 3 ; ++j) {
                 for(int i = 0 ; i < 3 ; ++i) {
