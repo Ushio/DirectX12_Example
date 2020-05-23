@@ -130,7 +130,7 @@ public:
 				task.lower[i] = to_ordered(+FLT_MAX);
 				task.upper[i] = to_ordered(-FLT_MAX);
 			}
-			task.currentNode = 0;
+			task.parentNode = -1;
 			memcpy(p, &task, sizeof(BuildTask));
 		});
 
@@ -401,11 +401,6 @@ void drawNode(const std::vector<BvhNode>& nodes, int node, int depth = 0)
 	if (nodes.empty()) {
 		return;
 	}
-
-	if (0 <= nodes[node].geomBeg) {
-		// leaf
-		return;
-	}
 	if (5 < depth) {
 		return;
 	}
@@ -426,8 +421,14 @@ void drawNode(const std::vector<BvhNode>& nodes, int node, int depth = 0)
 	glm::vec3 upperR(nodes[node].upperR[0], nodes[node].upperR[1], nodes[node].upperR[2]);
 	pr::DrawAABB(lowerR, upperR, c);
 
-	drawNode(nodes, nodes[node].childNode, depth + 1);
-	drawNode(nodes, nodes[node].childNode + 1, depth + 1);
+	if ( ( nodes[node].indexL[0] & 0x80000000 ) == 0 )
+	{
+		drawNode( nodes, nodes[node].indexL[0], depth + 1 );
+	}
+	if ( ( nodes[node].indexR[0] & 0x80000000 ) == 0 )
+	{
+		drawNode( nodes, nodes[node].indexR[0], depth + 1 );
+	}
 }
 int main()
 {

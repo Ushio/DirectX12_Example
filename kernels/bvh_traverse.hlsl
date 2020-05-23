@@ -183,10 +183,23 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 		uint node = stack[stackcount - 1];
 		stackcount--;
 
-		if(0 <= bvhNodes[node].geomBeg)
+		float3 lowerL = float3(bvhNodes[node].lowerL[0], bvhNodes[node].lowerL[1], bvhNodes[node].lowerL[2]);
+		float3 upperL = float3(bvhNodes[node].upperL[0], bvhNodes[node].upperL[1], bvhNodes[node].upperL[2]);
+		float3 lowerR = float3(bvhNodes[node].lowerR[0], bvhNodes[node].lowerR[1], bvhNodes[node].lowerR[2]);
+		float3 upperR = float3(bvhNodes[node].upperR[0], bvhNodes[node].upperR[1], bvhNodes[node].upperR[2]);
+
+		float hitTL;
+		float hitTR;
+		bool hitL = slabs(lowerL, upperL, ro, one_over_rd, tmin, hitTL);
+		bool hitR = slabs(lowerR, upperR, ro, one_over_rd, tmin, hitTR);
+		uint isLeafL = bvhNodes[node].indexL[0] & 0x80000000;
+		uint isLeafR = bvhNodes[node].indexR[0] & 0x80000000;
+
+		if( hitL && isLeafL )
 		{
-			// leaf
-			for(int i = bvhNodes[node].geomBeg ; i < bvhNodes[node].geomEnd ; i++)
+			uint geomBeg = bvhNodes[node].indexL[0] & 0x7FFFFFFF;
+			uint geomEnd = bvhNodes[node].indexL[1] & 0x7FFFFFFF;
+			for(int i = geomBeg ; i < geomEnd ; i++)
 			{
 				int iPrim = bvhElementIndices[i];
 				int index = iPrim * 3;
@@ -201,37 +214,98 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 				}
 			}
 		}
-		else
+		if( hitR && isLeafR )
 		{
-			float3 lowerL = float3(bvhNodes[node].lowerL[0], bvhNodes[node].lowerL[1], bvhNodes[node].lowerL[2]);
-			float3 upperL = float3(bvhNodes[node].upperL[0], bvhNodes[node].upperL[1], bvhNodes[node].upperL[2]);
-			float3 lowerR = float3(bvhNodes[node].lowerR[0], bvhNodes[node].lowerR[1], bvhNodes[node].lowerR[2]);
-			float3 upperR = float3(bvhNodes[node].upperR[0], bvhNodes[node].upperR[1], bvhNodes[node].upperR[2]);
+			uint geomBeg = bvhNodes[node].indexR[0] & 0x7FFFFFFF;
+			uint geomEnd = bvhNodes[node].indexR[1] & 0x7FFFFFFF;
+			for(int i = geomBeg ; i < geomEnd ; i++)
+			{
+				int iPrim = bvhElementIndices[i];
+				int index = iPrim * 3;
+				float3 v0 = vertexBuffer[indexBuffer[index]];
+				float3 v1 = vertexBuffer[indexBuffer[index+1]];
+				float3 v2 = vertexBuffer[indexBuffer[index+2]];
 
-			float hitTL;
-			float hitTR;
-			bool hitL = slabs(lowerL, upperL, ro, one_over_rd, tmin, hitTL);
-			bool hitR = slabs(lowerR, upperR, ro, one_over_rd, tmin, hitTR);
-			uint childL = bvhNodes[node].childNode;
-			uint childR = childL + 1;
-			if(hitL && hitR) {
-				if(hitTL < hitTR) {
-					stack[stackcount++] = childR;
-					stack[stackcount++] = childL;
-				}
-				else
+				if(intersect_ray_triangle(ro, rd, v0, v1, v2, tmin, uv))
 				{
-					stack[stackcount++] = childL;
-					stack[stackcount++] = childR;
+					float3 n = cross(v1 - v0, v2 - v0);
+					isect = float4(tmin, -n /* index buffer stored as CW */);
 				}
 			}
-			else if(hitL) {
+		}
+		
+		bool continueL = hitL && isLeafL == 0;
+		bool continueR = hitR && isLeafR == 0;
+		uint childL = bvhNodes[node].indexL[0];
+		uint childR = bvhNodes[node].indexR[0];
+
+		if(continueL && continueR) {
+			if(hitTL < hitTR) {
+				stack[stackcount++] = childR;
 				stack[stackcount++] = childL;
 			}
-			else if(hitR) {
+			else
+			{
+				stack[stackcount++] = childL;
 				stack[stackcount++] = childR;
 			}
 		}
+		else if(continueL) {
+			stack[stackcount++] = childL;
+		}
+		else if(continueR) {
+			stack[stackcount++] = childR;
+		}
+
+		// if(0 <= bvhNodes[node].geomBeg)
+		// {
+		// 	// leaf
+		// 	for(int i = bvhNodes[node].geomBeg ; i < bvhNodes[node].geomEnd ; i++)
+		// 	{
+		// 		int iPrim = bvhElementIndices[i];
+		// 		int index = iPrim * 3;
+		// 		float3 v0 = vertexBuffer[indexBuffer[index]];
+		// 		float3 v1 = vertexBuffer[indexBuffer[index+1]];
+		// 		float3 v2 = vertexBuffer[indexBuffer[index+2]];
+
+		// 		if(intersect_ray_triangle(ro, rd, v0, v1, v2, tmin, uv))
+		// 		{
+		// 			float3 n = cross(v1 - v0, v2 - v0);
+		// 			isect = float4(tmin, -n /* index buffer stored as CW */);
+		// 		}
+		// 	}
+		// }
+		// else
+		// {
+		// 	float3 lowerL = float3(bvhNodes[node].lowerL[0], bvhNodes[node].lowerL[1], bvhNodes[node].lowerL[2]);
+		// 	float3 upperL = float3(bvhNodes[node].upperL[0], bvhNodes[node].upperL[1], bvhNodes[node].upperL[2]);
+		// 	float3 lowerR = float3(bvhNodes[node].lowerR[0], bvhNodes[node].lowerR[1], bvhNodes[node].lowerR[2]);
+		// 	float3 upperR = float3(bvhNodes[node].upperR[0], bvhNodes[node].upperR[1], bvhNodes[node].upperR[2]);
+
+		// 	float hitTL;
+		// 	float hitTR;
+		// 	bool hitL = slabs(lowerL, upperL, ro, one_over_rd, tmin, hitTL);
+		// 	bool hitR = slabs(lowerR, upperR, ro, one_over_rd, tmin, hitTR);
+		// 	uint childL = bvhNodes[node].childNode;
+		// 	uint childR = childL + 1;
+		// 	if(hitL && hitR) {
+		// 		if(hitTL < hitTR) {
+		// 			stack[stackcount++] = childR;
+		// 			stack[stackcount++] = childL;
+		// 		}
+		// 		else
+		// 		{
+		// 			stack[stackcount++] = childL;
+		// 			stack[stackcount++] = childR;
+		// 		}
+		// 	}
+		// 	else if(hitL) {
+		// 		stack[stackcount++] = childL;
+		// 	}
+		// 	else if(hitR) {
+		// 		stack[stackcount++] = childR;
+		// 	}
+		// }
 	}
 
 	if(numberOfElement(colorRGBXBuffer) <= gID.x) {

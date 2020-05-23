@@ -157,27 +157,70 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 
     if(splitAxis < 0 || task.geomEnd - task.geomBeg <= 1)
     {
-        // no split
-        bvhNodes[task.currentNode].geomBeg = task.geomBeg;
-        bvhNodes[task.currentNode].geomEnd = task.geomEnd;
+        if(task.parentNode < 0)
+        {
+            // Root no split case
+
+            uint parentNode;
+            InterlockedAdd(bvhNodeCounter[0], 1, parentNode);
+            
+            bvhNodes[parentNode].indexL[0] = 0x80000000 | (uint)task.geomBeg;
+            bvhNodes[parentNode].indexL[1] = (uint)task.geomEnd;
+            bvhNodes[parentNode].indexR[0] = 0x80000000;
+            bvhNodes[parentNode].indexR[1] = 0;
+            
+            int elower = to_ordered(+FLT_MAX);
+            int eupper = to_ordered(-FLT_MAX);
+            for(int axis = 0 ; axis < 3 ; ++axis)
+            {
+                bvhNodes[parentNode].lowerL[axis] = from_ordered(task.lower[axis]);
+                bvhNodes[parentNode].upperL[axis] = from_ordered(task.upper[axis]);
+                bvhNodes[parentNode].lowerR[axis] = elower;
+                bvhNodes[parentNode].upperR[axis] = eupper;
+            }
+        }
+        else
+        {
+            // no split
+            if(task.childOrder == 0)
+            {
+                bvhNodes[task.parentNode].indexL[0] = 0x80000000 | (uint)task.geomBeg;
+                bvhNodes[task.parentNode].indexL[1] = (uint)task.geomEnd;
+            }
+            else
+            {
+                bvhNodes[task.parentNode].indexR[0] = 0x80000000 | (uint)task.geomBeg;
+                bvhNodes[task.parentNode].indexR[1] = (uint)task.geomEnd;
+            }
+        }
     }
     else 
     {
+        // do split
+        uint currentNode;
+        InterlockedAdd(bvhNodeCounter[0], 1, currentNode);
+
+        // set link
+        if(0 <= task.parentNode)
+        {
+            if(task.childOrder == 0)
+            {
+                bvhNodes[task.parentNode].indexL[0] = currentNode;
+            }
+            else
+            {
+                bvhNodes[task.parentNode].indexR[0] = currentNode;
+            }
+        }
+
         // store child AABB. the child AABBs are already caclulated.
         for(int axis = 0 ; axis < 3 ; ++axis)
         {
-            bvhNodes[task.currentNode].lowerL[axis] = from_ordered(splitBinL.lower[axis]);
-            bvhNodes[task.currentNode].upperL[axis] = from_ordered(splitBinL.upper[axis]);
-            bvhNodes[task.currentNode].lowerR[axis] = from_ordered(splitBinR.lower[axis]);
-            bvhNodes[task.currentNode].upperR[axis] = from_ordered(splitBinR.upper[axis]);
+            bvhNodes[currentNode].lowerL[axis] = from_ordered(splitBinL.lower[axis]);
+            bvhNodes[currentNode].upperL[axis] = from_ordered(splitBinL.upper[axis]);
+            bvhNodes[currentNode].lowerR[axis] = from_ordered(splitBinR.lower[axis]);
+            bvhNodes[currentNode].upperR[axis] = from_ordered(splitBinR.upper[axis]);
         }
-        bvhNodes[task.currentNode].geomBeg = -1;
-        bvhNodes[task.currentNode].geomEnd = -1;
-
-        // allocate child nodes
-        uint childnode;
-        InterlockedAdd(bvhNodeCounter[0], 2, childnode);
-        bvhNodes[task.currentNode].childNode = childnode;
 
         // add child task
         uint lrTaskIndex = s_taskCounterBase + lrTaskIndexLocal;
@@ -187,19 +230,20 @@ void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
         BuildTask lTask;
         lTask.geomBeg = task.geomBeg;
         lTask.geomEnd = task.geomBeg + splitBinL.nElem;
-        lTask.currentNode = childnode;
+        lTask.parentNode = currentNode;
+        lTask.childOrder = 0;
         for(axis = 0 ; axis < 3 ; ++axis)
         {
             lTask.lower[axis] = splitBinL.lower[axis];
             lTask.upper[axis] = splitBinL.upper[axis];
         }
         buildTasksOut[lTaskIndex] = lTask;
-        buildTasksOut[lTaskIndex].currentNode = childnode;
 
         BuildTask rTask;
         rTask.geomBeg = task.geomBeg + splitBinL.nElem;
         rTask.geomEnd = task.geomEnd;
-        rTask.currentNode = childnode + 1;
+        rTask.parentNode = currentNode;
+        rTask.childOrder = 1;
         for(axis = 0 ; axis < 3 ; ++axis)
         {
             rTask.lower[axis] = splitBinR.lower[axis];

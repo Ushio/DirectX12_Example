@@ -1,8 +1,8 @@
 ﻿#include "EzDx.hpp"
 #include "pr.hpp"
 #include "lwHoudiniLoader.hpp"
-#include "bvh.h"
 #include "WinPixEventRuntime/pix3.h"
+#include "bvh.h"
 
 struct Arguments
 {
@@ -165,6 +165,8 @@ public:
 
 		_timestamp = std::unique_ptr<TimestampObject>(new TimestampObject(deviceObject->device(), 1024));
 
+		pr::Stopwatch sw;
+
 		uint32_t vBytes = polygon->P.size() * sizeof(glm::vec3);
 		uint32_t iBytes = polygon->indices.size() * sizeof(uint32_t);
 		vertexBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), vBytes, sizeof(glm::vec3), D3D12_RESOURCE_STATE_COPY_DEST));
@@ -192,6 +194,8 @@ public:
 		// wait for copying
 		std::shared_ptr<FenceObject> fence = deviceObject->queueObject()->fence(deviceObject->device());
 		fence->wait();
+
+		printf("setup vertex and indices %.3f ( %lld bytes, %lld bytes )ms\n", 1000.0 * sw.elapsed(), vertexBuffer->bytes(), indexBuffer->bytes() );
 	}
 	int width() const { return _width; }
 	int height() const { return _height; }
@@ -218,7 +222,7 @@ public:
 				task.lower[i] = to_ordered(+FLT_MAX);
 				task.upper[i] = to_ordered(-FLT_MAX);
 			}
-			task.currentNode = 0;
+			task.parentNode = -1;
 			memcpy(p, &task, sizeof(BuildTask));
 		});
 
@@ -248,18 +252,22 @@ public:
 		std::unique_ptr<BufferObjectUAV> binningBuffer( new BufferObjectUAV( deviceObject->device(), nProcessBlocks * sizeof( BinningBuffer ), sizeof( BinningBuffer ), D3D12_RESOURCE_STATE_COMMON ) );
 		std::unique_ptr<BufferObjectUAV> executionIterator( new BufferObjectUAV( deviceObject->device(), sizeof( uint32_t ), sizeof( uint32_t ), D3D12_RESOURCE_STATE_COMMON ) );
 
-		printf("binningBuffer %d bytes\n", binningBuffer->bytes());
-
-		// NodeBuffer
-		int maxNodes = _polygon->primitiveCount * 2 - 1;
+		// NodeBuffer geombeg, geomend are stored to indexL, indexR
+		int maxNodes = std::max((int)_polygon->primitiveCount - 1, 1);
+		printf("mid1 %.3f ms\n", 1000.0 * sw.elapsed());
 		bvhNodeBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), maxNodes * sizeof(BvhNode), sizeof(BvhNode), D3D12_RESOURCE_STATE_COMMON));
+		printf("mid2 %.3f ms\n", 1000.0 * sw.elapsed());
+
+		printf("%d bytes allocated bvh node (%d prim) \n", bvhNodeBuffer->bytes(), _polygon->primitiveCount);
+
 		bvhNodeCounterBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), sizeof(uint32_t), sizeof(uint32_t), D3D12_RESOURCE_STATE_COPY_DEST));
 
 		UploaderObject bvhNodeCounterDefault(deviceObject->device(), sizeof(uint32_t));
 		bvhNodeCounterDefault.map([&](void* p) {
-			uint32_t one = 1;
-			memcpy(p, &one, sizeof(uint32_t));
+			memset(p, 0, sizeof(uint32_t));
 		});
+		
+
 
 		computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 			// Calculate AABB for each element
@@ -310,8 +318,6 @@ public:
 		deviceObject->queueObject()->execute( computeCommandList.get() );
 		
 		ConstantBufferObject binningArgument( deviceObject->device(), sizeof(uint32_t), D3D12_RESOURCE_STATE_COMMON );
-
-		
 		DownloaderObject ringRangesDownloader(deviceObject->device(), sizeof(uint32_t) * 4 );
 
 		// Setup Scan Args
@@ -337,6 +343,8 @@ public:
 
 		UploaderObject zeroU32(deviceObject->device(), sizeof(uint32_t));
 		zeroU32.map([](void* p) { memset(p, 0, sizeof(uint32_t)); });
+
+		printf("setup %.3f ms\n", 1000.0 * sw.elapsed());
 
 		int taskCount = 1;
 		// for (int itr = 0; itr < 8; ++itr)
@@ -758,17 +766,14 @@ private:
 
 	const lwh::Polygon* _polygon;
 };
-void drawNode(const std::vector<BvhNode>& nodes, int node, int depth = 0)
+void drawNode( const std::vector<BvhNode>& nodes, int node, int depth = 0 )
 {
-	if (nodes.empty()) {
+	if ( nodes.empty() )
+	{
 		return;
 	}
-
-	if (0 <= nodes[node].geomBeg) {
-		// leaf
-		return;
-	}
-	if (2 < depth) {
+	if ( 5 < depth )
+	{
 		return;
 	}
 	static std::vector<glm::u8vec3> colors = {
@@ -780,16 +785,22 @@ void drawNode(const std::vector<BvhNode>& nodes, int node, int depth = 0)
 		{255, 255, 0},
 	};
 	auto c = colors[depth % colors.size()];
-	glm::vec3 lowerL(nodes[node].lowerL[0], nodes[node].lowerL[1], nodes[node].lowerL[2]);
-	glm::vec3 upperL(nodes[node].upperL[0], nodes[node].upperL[1], nodes[node].upperL[2]);
-	pr::DrawAABB(lowerL, upperL, c);
+	glm::vec3 lowerL( nodes[node].lowerL[0], nodes[node].lowerL[1], nodes[node].lowerL[2] );
+	glm::vec3 upperL( nodes[node].upperL[0], nodes[node].upperL[1], nodes[node].upperL[2] );
+	pr::DrawAABB( lowerL, upperL, c );
 
-	glm::vec3 lowerR(nodes[node].lowerR[0], nodes[node].lowerR[1], nodes[node].lowerR[2]);
-	glm::vec3 upperR(nodes[node].upperR[0], nodes[node].upperR[1], nodes[node].upperR[2]);
-	pr::DrawAABB(lowerR, upperR, c);
+	glm::vec3 lowerR( nodes[node].lowerR[0], nodes[node].lowerR[1], nodes[node].lowerR[2] );
+	glm::vec3 upperR( nodes[node].upperR[0], nodes[node].upperR[1], nodes[node].upperR[2] );
+	pr::DrawAABB( lowerR, upperR, c );
 
-	drawNode(nodes, nodes[node].childNode, depth + 1);
-	drawNode(nodes, nodes[node].childNode + 1, depth + 1);
+	if ( ( nodes[node].indexL[0] & 0x80000000 ) == 0 )
+	{
+		drawNode( nodes, nodes[node].indexL[0], depth + 1 );
+	}
+	if ( ( nodes[node].indexR[0] & 0x80000000 ) == 0 )
+	{
+		drawNode( nodes, nodes[node].indexR[0], depth + 1 );
+	}
 }
 int main()
 {
