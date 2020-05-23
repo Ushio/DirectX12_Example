@@ -159,6 +159,15 @@ inline int64_t dispatchsize( int64_t n, int64_t threads )
 {
 	return ( n + threads - 1 ) / threads;
 }
+inline uint64_t alignPointer( uint64_t p, uint64_t alignment )
+{
+	uint64_t m = p % alignment;
+	if (m == 0) 
+	{
+		return p;
+	}
+	return p + alignment - m;
+}
 
 class FenceObject
 {
@@ -380,6 +389,88 @@ private:
 	DxPtr<IDXGISwapChain1> _swapchain;
 };
 
+class IResourceAcceptor
+{
+public:
+	virtual ~IResourceAcceptor() {}
+	virtual void accept( DxPtr<ID3D12Resource> resource ) = 0;
+};
+
+class BatchHeapAllocator
+{
+public:
+	void requestDefaultUAV( IResourceAcceptor* acceptor, uint64_t bytes, D3D12_RESOURCE_STATES initialState )
+	{
+		DX_ASSERT(_allocated == false, "");
+		
+		_bytesDefault = alignPointer( _bytesDefault, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT );
+
+		Allocation allocation = {};
+		allocation.heapOffset = _bytesDefault;
+		allocation.bytes = bytes;
+		allocation.initialState = initialState;
+		allocation.resourceDesc = CD3DX12_RESOURCE_DESC::Buffer( bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS );
+		allocation.acceptor = acceptor;
+		_allocationDefault.push_back(allocation);
+
+		_bytesDefault += bytes;
+	}
+	void allocate( ID3D12Device* device )
+	{
+		DX_ASSERT(_allocated == false, "");
+		_allocated = true;
+
+		HRESULT hr;
+		hr = device->CreateHeap( &CD3DX12_HEAP_DESC( _bytesDefault, D3D12_HEAP_TYPE_DEFAULT ), IID_PPV_ARGS( _heapDefault.getAddressOf() ) );
+		DX_ASSERT(hr == S_OK, "");
+
+		for (int i = 0; i < _allocationDefault.size(); ++i)
+		{
+			DxPtr<ID3D12Resource> resource;
+			hr = device->CreatePlacedResource(
+				_heapDefault.get(),
+				_allocationDefault[i].heapOffset,
+				&_allocationDefault[i].resourceDesc,
+				_allocationDefault[i].initialState,
+				nullptr,
+				IID_PPV_ARGS(resource.getAddressOf())
+			);
+			DX_ASSERT(hr == S_OK, "");
+			_allocationDefault[i].acceptor->accept( resource );
+			_resources.push_back( resource );
+		}
+	}
+
+	void activateResources( ID3D12GraphicsCommandList* commandList )
+	{
+		DX_ASSERT(_allocated, "");
+		std::vector<D3D12_RESOURCE_BARRIER> barriers;
+		for ( auto r : _resources )
+		{
+			barriers.push_back( CD3DX12_RESOURCE_BARRIER::Aliasing( nullptr, r.get() ) );
+		}
+		resourceBarrier( commandList, barriers );
+	}
+
+private:
+	bool _allocated = false;
+
+	struct Allocation
+	{
+		uint64_t heapOffset;
+		uint64_t bytes;
+		D3D12_RESOURCE_STATES initialState;
+		D3D12_RESOURCE_DESC resourceDesc;
+		IResourceAcceptor* acceptor;
+	};
+	std::vector<Allocation> _allocationDefault;
+	uint64_t _bytesDefault = 0;
+
+	DxPtr<ID3D12Heap> _heapDefault;
+
+	std::vector<DxPtr<ID3D12Resource>> _resources;
+};
+
 class UploaderObject
 {
 public:
@@ -488,13 +579,13 @@ private:
 	DxPtr<ID3D12Resource> _resource;
 };
 
-class BufferObjectUAV
+class BufferObjectUAV : public IResourceAcceptor
 {
 public:
 	BufferObjectUAV( const BufferObjectUAV& ) = delete;
 	void operator=( const BufferObjectUAV& ) = delete;
 
-	BufferObjectUAV( ID3D12Device* device, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState, bool hasCounter = false, D3D12_RESOURCE_STATES counterInitialState = D3D12_RESOURCE_STATE_COPY_DEST )
+	BufferObjectUAV( ID3D12Device* device, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState )
 		: _bytes( std::max( bytes, 1LL ) ), _structureByteStride( structureByteStride )
 	{
 		HRESULT hr;
@@ -506,25 +597,13 @@ public:
 			nullptr,
 			IID_PPV_ARGS( _resource.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
+	}
+	BufferObjectUAV( BatchHeapAllocator *batchHeapAllocator, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState, bool hasCounter = false, D3D12_RESOURCE_STATES counterInitialState = D3D12_RESOURCE_STATE_COPY_DEST )
+		: _bytes( std::max( bytes, 1LL ) ), _structureByteStride( structureByteStride )
+	{
+		HRESULT hr;
 
-		if ( hasCounter )
-		{
-			hr = device->CreateCommittedResource(
-				&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
-				D3D12_HEAP_FLAG_NONE /* I don't know */,
-				&CD3DX12_RESOURCE_DESC::Buffer( sizeof( uint32_t ), D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS ),
-				counterInitialState,
-				nullptr,
-				IID_PPV_ARGS( _counterResource.getAddressOf() ) );
-			DX_ASSERT( hr == S_OK, "" );
-			_counterResource->SetName(L"Counter");
-
-			_counterUploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, sizeof( uint32_t ) * 2 ) );
-			_counterUploader->map( []( void* p ) {
-				uint32_t data[2] = {0, 1};
-				memcpy( p, data, sizeof( uint32_t ) * 2 );
-			} );
-		}
+		batchHeapAllocator->requestDefaultUAV( this, _bytes, initialState );
 	}
 	int64_t bytes() const
 	{
@@ -542,21 +621,9 @@ public:
 	{
 		return CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), from, to );
 	}
-	D3D12_RESOURCE_BARRIER resourceBarrierUAVCounter()
-	{
-		return CD3DX12_RESOURCE_BARRIER::UAV( _counterResource.get() );
-	}
-	D3D12_RESOURCE_BARRIER resourceBarrierTransitionCounter( D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to )
-	{
-		return CD3DX12_RESOURCE_BARRIER::Transition( _counterResource.get(), from, to );
-	}
 	ID3D12Resource* resource()
 	{
 		return _resource.get();
-	}
-	ID3D12Resource* counterResource()
-	{
-		return _counterResource.get();
 	}
 	void copyFrom( ID3D12GraphicsCommandList* commandList, UploaderObject* uploader )
 	{
@@ -581,20 +648,6 @@ public:
 			downloader->resource(), 0,
 			_resource.get(), 0,
 			_bytes );
-	}
-	void setCounterValueZero(ID3D12GraphicsCommandList* commandList)
-	{
-		commandList->CopyBufferRegion(
-			_counterResource.get(), 0,
-			_counterUploader->resource(), 0,
-			sizeof(uint32_t));
-	}
-	void setCounterValueOne(ID3D12GraphicsCommandList* commandList)
-	{
-		commandList->CopyBufferRegion(
-			_counterResource.get(), 0,
-			_counterUploader->resource(), sizeof(uint32_t),
-			sizeof(uint32_t));
 	}
 	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDescription() const
 	{
@@ -621,6 +674,11 @@ public:
 	void setName( std::wstring name )
 	{
 		_resource->SetName( name.c_str() );
+	}
+
+	void accept( DxPtr<ID3D12Resource> resource ) override
+	{
+		_resource = resource;
 	}
 
 	// It's just for debug
@@ -654,38 +712,10 @@ public:
 
 		return output;
 	}
-	uint32_t synchronizedDownloadCounter( ID3D12Device* device, QueueObject* queue )
-	{
-		CommandObject command( device, D3D12_COMMAND_LIST_TYPE_DIRECT );
-		DownloaderObject downloader( device, sizeof( uint32_t ) );
-
-		command.storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
-			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _counterResource.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
-			commandList->CopyBufferRegion(
-				downloader.resource(), 0,
-				_counterResource.get(), 0,
-				sizeof( uint32_t ) );
-			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _counterResource.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
-		} );
-		queue->execute( &command );
-
-		std::shared_ptr<FenceObject> fence = queue->fence( device );
-		fence->wait();
-
-		uint32_t output;
-		downloader.map( [&]( const void* p ) {
-			memcpy( &output, p, sizeof( uint32_t ) );
-		} );
-
-		return output;
-	}
-
 private:
 	int64_t _bytes;
 	int64_t _structureByteStride;
 	DxPtr<ID3D12Resource> _resource;
-	DxPtr<ID3D12Resource> _counterResource;
-	std::unique_ptr<UploaderObject> _counterUploader;
 };
 
 class ConstantBufferObject

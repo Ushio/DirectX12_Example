@@ -82,6 +82,8 @@ public:
 	Rt( DeviceObject* deviceObject, const lwh::Polygon* polygon, int width, int height ) 
 		: _width( width ), _height( height ), _deviceObject( deviceObject ), _polygon(polygon)
 	{
+		pr::Stopwatch sw;
+
 		computeCommandList = std::unique_ptr<CommandObject>( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 		computeCommandList->setName( L"Compute" );
 		heap = std::unique_ptr<StackDescriptorHeapObject>( new StackDescriptorHeapObject( deviceObject->device(), 128 ) );
@@ -165,8 +167,6 @@ public:
 
 		_timestamp = std::unique_ptr<TimestampObject>(new TimestampObject(deviceObject->device(), 1024));
 
-		pr::Stopwatch sw;
-
 		uint32_t vBytes = polygon->P.size() * sizeof(glm::vec3);
 		uint32_t iBytes = polygon->indices.size() * sizeof(uint32_t);
 		vertexBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), vBytes, sizeof(glm::vec3), D3D12_RESOURCE_STATE_COPY_DEST));
@@ -196,6 +196,7 @@ public:
 		fence->wait();
 
 		printf("setup vertex and indices %.3f ( %lld bytes, %lld bytes )ms\n", 1000.0 * sw.elapsed(), vertexBuffer->bytes(), indexBuffer->bytes() );
+		printf("");
 	}
 	int width() const { return _width; }
 	int height() const { return _height; }
@@ -206,11 +207,13 @@ public:
 
 		DeviceObject* deviceObject = _deviceObject;
 
-		// int nProcessBlocks = std::max( 10 * deviceObject->totalLaneCount(), 1024 );
 		int nProcessBlocks = 1024 * 64;
 
 		heap->clear();
 		_timestamp->clear();
+
+		UploaderObject zeroU32(deviceObject->device(), sizeof(uint32_t));
+		zeroU32.map([](void* p) { memset(p, 0, sizeof(uint32_t)); });
 
 		std::unique_ptr<UploaderObject> firstTaskUploader( new UploaderObject( deviceObject->device(), sizeof( BuildTask ) ) );
 		firstTaskUploader->map([&](void* p)
@@ -226,9 +229,9 @@ public:
 			memcpy(p, &task, sizeof(BuildTask));
 		});
 
+		uint32_t taskBufferCount = std::max((uint32_t)2, _polygon->primitiveCount);
 		std::unique_ptr<BufferObjectUAV> bvhElementBuffer( new BufferObjectUAV(deviceObject->device(), _polygon->primitiveCount * sizeof(BvhElement), sizeof(BvhElement), D3D12_RESOURCE_STATE_COMMON));
-		
-		std::unique_ptr<BufferObjectUAV> bvhBuildTaskBuffer( new BufferObjectUAV(deviceObject->device(), _polygon->primitiveCount * sizeof(BuildTask), sizeof(BuildTask), D3D12_RESOURCE_STATE_COPY_DEST ));
+		std::unique_ptr<BufferObjectUAV> bvhBuildTaskBuffer( new BufferObjectUAV(deviceObject->device(), taskBufferCount * sizeof(BuildTask), sizeof(BuildTask), D3D12_RESOURCE_STATE_COPY_DEST ));
 		
 		std::unique_ptr<BufferObjectUAV> bvhBuildTaskRingRanges[2];
 		bvhBuildTaskRingRanges[0] = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV( deviceObject->device(), 2 * sizeof( uint32_t ), sizeof( uint32_t ), D3D12_RESOURCE_STATE_COPY_DEST ) );
@@ -243,7 +246,6 @@ public:
 		bvhElementIndicesBuffers[0] = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV(deviceObject->device(), _polygon->primitiveCount * sizeof(uint32_t), sizeof(uint32_t), D3D12_RESOURCE_STATE_COMMON ));
 		bvhElementIndicesBuffers[1] = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV(deviceObject->device(), _polygon->primitiveCount * sizeof(uint32_t), sizeof(uint32_t), D3D12_RESOURCE_STATE_COMMON ));
 		
-		// 
 		std::unique_ptr<BufferObjectUAV> executionCountBuffer(new BufferObjectUAV(deviceObject->device(), nProcessBlocks * sizeof(uint32_t), sizeof(uint32_t), D3D12_RESOURCE_STATE_COMMON));
 		std::unique_ptr<BufferObjectUAV> executionTableBuffers[2];
 		executionTableBuffers[0] = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV( deviceObject->device(), nProcessBlocks * sizeof( uint32_t ), sizeof( uint32_t ), D3D12_RESOURCE_STATE_COPY_DEST ) );
@@ -254,20 +256,8 @@ public:
 
 		// NodeBuffer geombeg, geomend are stored to indexL, indexR
 		int maxNodes = std::max((int)_polygon->primitiveCount - 1, 1);
-		printf("mid1 %.3f ms\n", 1000.0 * sw.elapsed());
 		bvhNodeBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), maxNodes * sizeof(BvhNode), sizeof(BvhNode), D3D12_RESOURCE_STATE_COMMON));
-		printf("mid2 %.3f ms\n", 1000.0 * sw.elapsed());
-
-		printf("%d bytes allocated bvh node (%d prim) \n", bvhNodeBuffer->bytes(), _polygon->primitiveCount);
-
 		bvhNodeCounterBuffer = std::unique_ptr<BufferObjectUAV>(new BufferObjectUAV(deviceObject->device(), sizeof(uint32_t), sizeof(uint32_t), D3D12_RESOURCE_STATE_COPY_DEST));
-
-		UploaderObject bvhNodeCounterDefault(deviceObject->device(), sizeof(uint32_t));
-		bvhNodeCounterDefault.map([&](void* p) {
-			memset(p, 0, sizeof(uint32_t));
-		});
-		
-
 
 		computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
 			// Calculate AABB for each element
@@ -289,7 +279,7 @@ public:
 			bvhBuildTaskBuffer->copyFrom( commandList, firstTaskUploader->resource(), 0, 0, sizeof( BuildTask ) );
 
 			// BVH Node Counter Clear
-			bvhNodeCounterBuffer->copyFrom(commandList, &bvhNodeCounterDefault);
+			bvhNodeCounterBuffer->copyFrom(commandList, &zeroU32 );
 
 			resourceBarrier(commandList, { 
 				bvhElementBuffer->resourceBarrierUAV(),
@@ -339,12 +329,6 @@ public:
 			resourceBarrier( commandList, barriers );
 		});
 		deviceObject->queueObject()->execute( computeCommandList.get() );
-
-
-		UploaderObject zeroU32(deviceObject->device(), sizeof(uint32_t));
-		zeroU32.map([](void* p) { memset(p, 0, sizeof(uint32_t)); });
-
-		printf("setup %.3f ms\n", 1000.0 * sw.elapsed());
 
 		int taskCount = 1;
 		// for (int itr = 0; itr < 8; ++itr)
