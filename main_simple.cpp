@@ -1,9 +1,74 @@
 ﻿#include "EzDx.hpp"
 #include "pr.hpp"
 
+struct BvhNode
+{
+	// AABBs
+	float lowerL[3];
+	float upperL[3];
+	float lowerR[3];
+	float upperR[3];
+
+	// childs or geoms
+	uint32_t indexL[2];
+	uint32_t indexR[2];
+};
+
 void run( DeviceObject* deviceObject )
 {
 	using namespace pr;
+
+	//for ( int i = 0; i < 33; i++ )
+	//{
+	//	uint64_t bytes = 1llu << (uint64_t)i;
+
+	//	Stopwatch sw;
+
+	//	DxPtr<ID3D12Heap> heap;
+	//	HRESULT hr = deviceObject->device()->CreateHeap( &CD3DX12_HEAP_DESC( bytes, D3D12_HEAP_TYPE_DEFAULT ), IID_PPV_ARGS( heap.getAddressOf() ) );
+
+	//	printf( "%lld %.3f\n", bytes, 1000.0 * sw.elapsed() );
+	//}
+
+	int align = 32;
+	for (int i = 0; i < 100; ++i)
+	{
+		printf("[%d] %d aligned\n", i, alignPointer(i, align));
+	}
+
+	{
+		uint64_t bytes = 1024llu * 1024 * 100;
+		Stopwatch sw;
+
+		HRESULT hr;
+		DxPtr<ID3D12Heap> heap;
+		hr = deviceObject->device()->CreateHeap(&CD3DX12_HEAP_DESC(bytes, D3D12_HEAP_TYPE_DEFAULT), IID_PPV_ARGS(heap.getAddressOf()));
+
+		// deviceObject->device()->CreatePlacedResource()
+
+		printf("%lld %.3f\n", bytes, 1000.0 * sw.elapsed());
+	}
+
+	//for (int i = 0; i < 30; i++)
+	//{
+	//	int bytes = 1 << i;
+	//	Stopwatch sw;
+	//	std::unique_ptr<BufferObjectUAV> valueBuffer0(new BufferObjectUAV(deviceObject->device(), bytes, 1, D3D12_RESOURCE_STATE_COMMON));
+	//	printf("%d %.3f\n", valueBuffer0->bytes(), 1000.0 * sw.elapsed());
+	//}
+
+	{
+		int maxNodes = 2612928;
+		Stopwatch sw;
+		std::unique_ptr<BufferObjectUAV> valueBuffer0(new BufferObjectUAV(deviceObject->device(), 1024 * 1024 * 100, 1, D3D12_RESOURCE_STATE_COMMON));
+		printf("allocate %d byte %.3f ms\n", valueBuffer0->bytes(), 1000.0 * sw.elapsed());
+	}
+	{
+		int maxNodes = 2612928;
+		Stopwatch sw;
+		std::unique_ptr<BufferObjectUAV> valueBuffer0(new BufferObjectUAV(deviceObject->device(), 1024 * 1024 * 100, 1, D3D12_RESOURCE_STATE_COMMON));
+		printf("allocate %d byte %.3f ms\n", valueBuffer0->bytes(), 1000.0 * sw.elapsed());
+	}
 
 	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 	computeCommandList->setName( L"Compute" );
