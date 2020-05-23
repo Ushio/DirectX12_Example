@@ -774,6 +774,76 @@ private:
 	std::unique_ptr<UploaderObject> _uploader;
 };
 
+class ConstantBufferArrayObject
+{
+public:
+	ConstantBufferArrayObject( const ConstantBufferArrayObject& ) = delete;
+	void operator=( const ConstantBufferArrayObject& ) = delete;
+
+	ConstantBufferArrayObject( ID3D12Device* device, int64_t bytesPerElement, int64_t elementCount, D3D12_RESOURCE_STATES initialState )
+		: _bytes( constantBufferSize( std::max( bytesPerElement, 1LL ) ) * elementCount ), _bytesStride( constantBufferSize( std::max( bytesPerElement, 1LL ) ) ), _elementCount( elementCount )
+	{
+		HRESULT hr;
+		hr = device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
+			D3D12_HEAP_FLAG_NONE /* I don't know */,
+			&CD3DX12_RESOURCE_DESC::Buffer( _bytes ),
+			initialState,
+			nullptr,
+			IID_PPV_ARGS( _resource.getAddressOf() ) );
+		DX_ASSERT( hr == S_OK, "" );
+		_uploader = std::unique_ptr<UploaderObject>( new UploaderObject( device, _bytes ) );
+		_uploader->setName( L"uploader-ConstantBufferArrayObject" );
+	}
+	D3D12_RESOURCE_BARRIER resourceBarrierTransition( D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to )
+	{
+		return CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), from, to );
+	}
+
+	// You must manage state by resourceBarrier
+	template <class T>
+	void upload( ID3D12GraphicsCommandList* commandList, const std::vector<T>& value )
+	{
+		static_assert( std::is_trivial<T>::value == true, "T should trivial type" );
+		DX_ASSERT( sizeof( T ) <= _bytesStride, "bad size" );
+		DX_ASSERT( value.size() == _elementCount, "bad size" );
+
+		_uploader->map( [&]( void* p ) {
+			for ( int i = 0; i < _elementCount; ++i )
+			{
+				memcpy( (uint8_t*)p + _bytesStride * i, value.data() + i, sizeof( T ) );
+			}
+		} );
+		commandList->CopyBufferRegion(
+			_resource.get(), 0,
+			_uploader->resource(), 0,
+			_bytes );
+	}
+	ID3D12Resource* resource()
+	{
+		return _resource.get();
+	}
+	void setName( std::wstring name )
+	{
+		_resource->SetName( name.c_str() );
+	}
+	int64_t bytesStride() const
+	{
+		return _bytesStride;
+	}
+	int64_t bytesOffset( int i ) const
+	{
+		return _bytesStride * i;
+	}
+
+private:
+	int64_t _bytes = 0;
+	int64_t _bytesStride = 0;
+	int64_t _elementCount = 0;
+	DxPtr<ID3D12Resource> _resource;
+	std::unique_ptr<UploaderObject> _uploader;
+};
+
 struct DescriptorEntity
 {
 	char type = 0;
@@ -847,6 +917,24 @@ public:
 				D3D12_CONSTANT_BUFFER_VIEW_DESC d = {};
 				d.BufferLocation = resource->GetGPUVirtualAddress();
 				d.SizeInBytes = resource->GetDesc().Width;
+				device->CreateConstantBufferView( &d, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
+				break;
+			}
+		}
+		DX_ASSERT( found, "" );
+	}
+	void b( ID3D12Device* device, int i, ID3D12Resource* resource, uint64_t bytesStride, uint64_t byteOffset )
+	{
+		bool found = false;
+		for ( DescriptorEntity e : _bufferDescriptorEntries )
+		{
+			if ( e.type == 'b' && e.registerIndex == i )
+			{
+				found = true;
+
+				D3D12_CONSTANT_BUFFER_VIEW_DESC d = {};
+				d.BufferLocation = resource->GetGPUVirtualAddress() + byteOffset;
+				d.SizeInBytes = bytesStride;
 				device->CreateConstantBufferView( &d, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
 				break;
 			}

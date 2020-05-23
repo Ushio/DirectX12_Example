@@ -311,22 +311,17 @@ public:
 		DownloaderObject ringRangesDownloader(deviceObject->device(), sizeof(uint32_t) * 4 );
 
 		// Setup Scan Args
-		std::vector<std::unique_ptr<ConstantBufferObject>> scanArgs( prefixScanIterationCount( nProcessBlocks ) );
-		for (int i = 0; i < scanArgs.size() ; ++i)
-		{
-			scanArgs[i] = std::unique_ptr<ConstantBufferObject>(new ConstantBufferObject(deviceObject->device(), sizeof(int32_t), D3D12_RESOURCE_STATE_COPY_DEST));
-		}
+		int scanArgCount = prefixScanIterationCount( nProcessBlocks );
+		std::unique_ptr<ConstantBufferArrayObject> scanArgs(new ConstantBufferArrayObject(deviceObject->device(), sizeof(int32_t), scanArgCount, D3D12_RESOURCE_STATE_COPY_DEST));
+		 
 		computeCommandList->storeCommand([&](ID3D12GraphicsCommandList* commandList) {
-			std::vector<D3D12_RESOURCE_BARRIER> barriers;
-
-			for ( int i = 0; i < scanArgs.size(); ++i )
+			std::vector<int32_t> offsets;
+			for ( int i = 0; i < scanArgCount; ++i )
 			{
-				int32_t offset = 1 << i;
-				scanArgs[i]->upload( commandList, offset );
-				barriers.push_back( scanArgs[i]->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ) );
+				offsets.push_back( 1 << i );
 			}
-
-			resourceBarrier( commandList, barriers );
+			scanArgs->upload( commandList, offsets );
+			resourceBarrier(commandList, { scanArgs->resourceBarrierTransition(D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON) });
 		});
 		deviceObject->queueObject()->execute( computeCommandList.get() );
 
@@ -400,7 +395,7 @@ public:
 					compute_bvh_scan->setComputeRootSignature(commandList);
 					heap->startNextHeapAndAssign(commandList, compute_bvh_scan->descriptorEnties());
 					heap->b(deviceObject->device(), 0, binningArgument.resource());
-					heap->b(deviceObject->device(), 1, scanArgs[i]->resource());
+					heap->b(deviceObject->device(), 1, scanArgs->resource(), scanArgs->bytesStride(), scanArgs->bytesOffset(i) );
 					heap->u(deviceObject->device(), 0, executionTableBuffers[0]->resource(), executionTableBuffers[0]->UAVDescription());
 					heap->u(deviceObject->device(), 1, executionTableBuffers[1]->resource(), executionTableBuffers[1]->UAVDescription());
 					compute_bvh_scan->dispatch(commandList, dispatchsize(consumeTaskCount, 64), 1, 1);
