@@ -305,8 +305,33 @@ public:
 
 		_deviceName = d.Description;
 
-		hr = D3D12CreateDevice( adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS( _device.getAddressOf() ) );
-		DX_ASSERT( hr == S_OK, "" );
+		struct DeviceIID {
+			IID iid;
+			const char* type;
+		};
+#define DEVICE_VER(type) { __uuidof(type), #type }
+		const DeviceIID deviceIIDs[] = {
+			DEVICE_VER(ID3D12Device8),
+			DEVICE_VER(ID3D12Device7),
+			DEVICE_VER(ID3D12Device6),
+			DEVICE_VER(ID3D12Device5),
+			DEVICE_VER(ID3D12Device4),
+			DEVICE_VER(ID3D12Device3),
+			DEVICE_VER(ID3D12Device2),
+			DEVICE_VER(ID3D12Device1),
+		};
+#undef DEVICE_VER
+
+		for (auto deviceIID : deviceIIDs)
+		{
+			hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, deviceIID.iid, (void**)_device.getAddressOf());
+			if (hr == S_OK)
+			{
+				_deviceIIDType = deviceIID.type;
+				break;
+			}
+		}
+		DX_ASSERT(hr == S_OK, "");
 
 		D3D12_FEATURE_DATA_SHADER_MODEL shaderModelFeature = {};
 		shaderModelFeature.HighestShaderModel = D3D_SHADER_MODEL_6_5;
@@ -380,6 +405,7 @@ public:
 		return _totalLaneCount;
 	}
 private:
+	std::string _deviceIIDType;
 	std::wstring _deviceName;
 	std::string _highestShaderModel;
 	int _waveLaneCount = 0;
