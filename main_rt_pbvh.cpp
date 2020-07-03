@@ -4,6 +4,8 @@
 #include "WinPixEventRuntime/pix3.h"
 #include "bvh.h"
 
+#include <future>
+
 struct Arguments
 {
 	int cb_width;
@@ -97,8 +99,8 @@ struct GPUBvhBuilder
 
 		auto compute_bvh_scan = std::unique_ptr<ComputeObject>( new ComputeObject() );
 		compute_bvh_scan->uRange(0, 2);
-		compute_bvh_scan->b( 0 );
-		compute_bvh_scan->b( 1 );
+		compute_bvh_scan->bRootConstant32( 0, 1 );
+		compute_bvh_scan->bRootConstant32( 1, 1 );
 		compute_bvh_scan->loadShaderAndBuild( deviceObject->device(), pr::GetDataPath( "bvh_scan.cso" ).c_str() );
 
 		auto compute_bvh_clearBin = std::unique_ptr<ComputeObject>( new ComputeObject() );
@@ -129,23 +131,38 @@ struct GPUBvhBuilder
 
 		printf("setup shaders %.3f ms\n", 1000.0 * sw.elapsed() );
 
+		std::vector<std::future<void>> asyncWaiter;
+
+		//for (int i = 0; i < 64; ++i)
+		//{
+		//	uint64_t bytes = 1LLU << i;
+		//	pr::Stopwatch sw;
+		//	{
+		//		//std::unique_ptr<BufferObjectUAV> buf(new BufferObjectUAV(deviceObject->device(), bytes, 1, D3D12_RESOURCE_STATE_COPY_DEST));
+		//		// std::unique_ptr<UploaderObject> buf( new UploaderObject(deviceObject->device(), bytes) );
+		//		// void *p = malloc(bytes);
+		//		// delete p;
+		//	}
+		//	printf("%lld bytes %.5fms\n", bytes, sw.elapsed() * 1000.0f);
+		//}
+
 		uint32_t vBytes = polygon->P.size() * sizeof( glm::vec3 );
 		uint32_t iBytes = polygon->indices.size() * sizeof( uint32_t );
 		vertexBuffer = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV( deviceObject->device(), vBytes, sizeof( glm::vec3 ), D3D12_RESOURCE_STATE_COPY_DEST ) );
 		indexBuffer = std::unique_ptr<BufferObjectUAV>( new BufferObjectUAV( deviceObject->device(), iBytes, sizeof( uint32_t ), D3D12_RESOURCE_STATE_COPY_DEST ) );
-		UploaderObject v_uploader( deviceObject->device(), vBytes );
-		UploaderObject i_uploader( deviceObject->device(), iBytes );
-		v_uploader.map( [&]( void* p ) {
+		UploaderObject *v_uploader = new UploaderObject( deviceObject->device(), vBytes );
+		UploaderObject *i_uploader = new UploaderObject( deviceObject->device(), iBytes );
+		v_uploader->map( [&]( void* p ) {
 			memcpy( p, polygon->P.data(), vBytes );
 		} );
-		i_uploader.map( [&]( void* p ) {
+		i_uploader->map( [&]( void* p ) {
 			memcpy( p, polygon->indices.data(), iBytes );
 		} );
 
 		auto computeCommandList = std::unique_ptr<CommandObject>( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 		computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
-			vertexBuffer->copyFrom( commandList, &v_uploader );
-			indexBuffer->copyFrom( commandList, &i_uploader );
+			vertexBuffer->copyFrom( commandList, v_uploader );
+			indexBuffer->copyFrom( commandList, i_uploader );
 
 			resourceBarrier( commandList, {
 											  vertexBuffer->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON ),
@@ -153,6 +170,19 @@ struct GPUBvhBuilder
 										  } );
 		} );
 		deviceObject->queueObject()->execute( computeCommandList.get() );
+
+		{
+			std::shared_ptr<FenceObject> fence = deviceObject->queueObject()->fence(deviceObject->device());
+			asyncWaiter.emplace_back(
+				std::async(std::launch::async, [fence, v_uploader, i_uploader]() {
+					fence->wait();
+					delete v_uploader;
+					delete i_uploader;
+				})
+			);
+			v_uploader = nullptr;
+			i_uploader = nullptr;
+		}
 
 		int nProcessBlocks = 1024 * 64;
 
@@ -208,7 +238,7 @@ struct GPUBvhBuilder
 			// Calculate AABB for each element
 			compute_bvh_element->setPipelineState( commandList );
 			compute_bvh_element->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, compute_bvh_element->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, compute_bvh_element->descriptorMap() );
 			heap->u( deviceObject->device(), 0, vertexBuffer->resource(), vertexBuffer->UAVDescription() );
 			heap->u( deviceObject->device(), 1, indexBuffer->resource(), indexBuffer->UAVDescription() );
 			heap->u( deviceObject->device(), 2, bvhElementBuffer->resource(), bvhElementBuffer->UAVDescription() );
@@ -235,7 +265,7 @@ struct GPUBvhBuilder
 			// FirstTask
 			compute_bvh_firstTask->setPipelineState( commandList );
 			compute_bvh_firstTask->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, compute_bvh_firstTask->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, compute_bvh_firstTask->descriptorMap() );
 			heap->u( deviceObject->device(), 0, bvhBuildTaskBuffer->resource(), bvhBuildTaskBuffer->UAVDescription() );
 			heap->u( deviceObject->device(), 1, bvhElementBuffer->resource(), bvhElementBuffer->UAVDescription() );
 			heap->u( deviceObject->device(), 2, bvhElementIndicesBuffers[0]->resource(), bvhElementIndicesBuffers[0]->UAVDescription() );
@@ -250,21 +280,6 @@ struct GPUBvhBuilder
 
 		ConstantBufferObject binningArgument( deviceObject->device(), sizeof( uint32_t ), D3D12_RESOURCE_STATE_COMMON );
 		DownloaderObject ringRangesDownloader( deviceObject->device(), sizeof( uint32_t ) * 4 );
-
-		// Setup Scan Args
-		int scanArgCount = prefixScanIterationCount( nProcessBlocks );
-		std::unique_ptr<ConstantBufferArrayObject> scanArgs( new ConstantBufferArrayObject( deviceObject->device(), sizeof( int32_t ), scanArgCount, D3D12_RESOURCE_STATE_COPY_DEST ) );
-
-		computeCommandList->storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
-			std::vector<int32_t> offsets;
-			for ( int i = 0; i < scanArgCount; ++i )
-			{
-				offsets.push_back( 1 << i );
-			}
-			scanArgs->upload( commandList, offsets );
-			resourceBarrier( commandList, {scanArgs->resourceBarrierTransition( D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON )} );
-		} );
-		deviceObject->queueObject()->execute( computeCommandList.get() );
 
 		int taskCount = 1;
 		for ( int itr = 0; true; ++itr )
@@ -283,7 +298,7 @@ struct GPUBvhBuilder
 				// clear bin
 				compute_bvh_clearBin->setPipelineState( commandList );
 				compute_bvh_clearBin->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, compute_bvh_clearBin->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, compute_bvh_clearBin->descriptorMap() );
 				heap->b( deviceObject->device(), 0, binningArgument.resource() );
 				heap->u( deviceObject->device(), 0, binningBuffer->resource(), binningBuffer->UAVDescription() );
 				heap->u( deviceObject->device(), 1, bvhBuildTaskBuffer->resource(), bvhBuildTaskBuffer->UAVDescription() );
@@ -294,7 +309,7 @@ struct GPUBvhBuilder
 
 				compute_bvh_consumeTask->setPipelineState( commandList );
 				compute_bvh_consumeTask->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, compute_bvh_consumeTask->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, compute_bvh_consumeTask->descriptorMap() );
 				heap->b( deviceObject->device(), 0, binningArgument.resource() );
 				heap->u( deviceObject->device(), 0, bvhBuildTaskBuffer->resource(), bvhBuildTaskBuffer->UAVDescription() );
 				heap->u( deviceObject->device(), 1, bvhBuildTaskRingRanges[0]->resource(), bvhBuildTaskRingRanges[0]->UAVDescription() );
@@ -305,7 +320,7 @@ struct GPUBvhBuilder
 				// Execution Count
 				compute_bvh_executionCount->setPipelineState( commandList );
 				compute_bvh_executionCount->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, compute_bvh_executionCount->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, compute_bvh_executionCount->descriptorMap() );
 				heap->u( deviceObject->device(), 0, binningBuffer->resource(), binningBuffer->UAVDescription() );
 				heap->u( deviceObject->device(), 1, executionCountBuffer->resource(), executionCountBuffer->UAVDescription() );
 				compute_bvh_executionCount->dispatch( commandList, dispatchsize( consumeTaskCount, 64 ), 1, 1 );
@@ -327,9 +342,12 @@ struct GPUBvhBuilder
 				{
 					compute_bvh_scan->setPipelineState( commandList );
 					compute_bvh_scan->setComputeRootSignature( commandList );
-					heap->startNextHeapAndAssign( commandList, compute_bvh_scan->descriptorEnties() );
-					heap->b( deviceObject->device(), 0, binningArgument.resource() );
-					heap->b( deviceObject->device(), 1, scanArgs->resource(), scanArgs->bytesStride(), scanArgs->bytesOffset( i ) );
+					heap->startNextHeapAndAssign( commandList, compute_bvh_scan->descriptorMap() );
+
+					int offset = 1 << i;
+					heap->bRootConstant32( commandList, 0, 1, &consumeTaskCount );
+					heap->bRootConstant32( commandList, 1, 1, &offset );
+
 					heap->u( deviceObject->device(), 0, executionTableBuffers[0]->resource(), executionTableBuffers[0]->UAVDescription() );
 					heap->u( deviceObject->device(), 1, executionTableBuffers[1]->resource(), executionTableBuffers[1]->UAVDescription() );
 					compute_bvh_scan->dispatch( commandList, dispatchsize( consumeTaskCount, 64 ), 1, 1 );
@@ -349,7 +367,7 @@ struct GPUBvhBuilder
 				PIXBeginEvent( commandList, PIX_COLOR_DEFAULT, "Binning" );
 				compute_bvh_binning->setPipelineState( commandList );
 				compute_bvh_binning->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, compute_bvh_binning->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, compute_bvh_binning->descriptorMap() );
 				heap->b( deviceObject->device(), 0, binningArgument.resource() );
 				heap->u( deviceObject->device(), 0, executionCountBuffer->resource(), executionCountBuffer->UAVDescription() );
 				heap->u( deviceObject->device(), 1, executionTableBuffers[0]->resource(), executionTableBuffers[0]->UAVDescription() );
@@ -369,7 +387,7 @@ struct GPUBvhBuilder
 				PIXBeginEvent( commandList, PIX_COLOR_DEFAULT, "Select bin" );
 				compute_bvh_selectBin->setPipelineState( commandList );
 				compute_bvh_selectBin->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, compute_bvh_selectBin->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, compute_bvh_selectBin->descriptorMap() );
 				heap->b( deviceObject->device(), 0, binningArgument.resource() );
 				heap->u( deviceObject->device(), 0, bvhBuildTaskBuffer->resource(), bvhBuildTaskBuffer->UAVDescription() );
 				heap->u( deviceObject->device(), 1, bvhBuildTaskRingRanges[1]->resource(), bvhBuildTaskRingRanges[1]->UAVDescription() );
@@ -396,7 +414,7 @@ struct GPUBvhBuilder
 				PIXBeginEvent( commandList, PIX_COLOR_DEFAULT, "Reorder" );
 				compute_bvh_reorder->setPipelineState( commandList );
 				compute_bvh_reorder->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, compute_bvh_reorder->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, compute_bvh_reorder->descriptorMap() );
 				heap->b( deviceObject->device(), 0, binningArgument.resource() );
 				heap->u( deviceObject->device(), 0, executionCountBuffer->resource(), executionCountBuffer->UAVDescription() );
 				heap->u( deviceObject->device(), 1, executionTableBuffers[0]->resource(), executionTableBuffers[0]->UAVDescription() );
@@ -579,7 +597,7 @@ public:
 			// Execute
 			compute_bvh_traverse->setPipelineState( commandList );
 			compute_bvh_traverse->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, compute_bvh_traverse->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, compute_bvh_traverse->descriptorMap() );
 			heap->u( _deviceObject->device(), 0, colorRGBX8Buffer->resource(), colorRGBX8Buffer->UAVDescription() );
 			heap->u( _deviceObject->device(), 1, builder->vertexBuffer->resource(), builder->vertexBuffer->UAVDescription() );
 			heap->u( _deviceObject->device(), 2, builder->indexBuffer->resource(), builder->indexBuffer->UAVDescription() );

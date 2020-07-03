@@ -93,7 +93,7 @@ public:
 			// Execute
 			compute->setPipelineState( commandList );
 			compute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, compute->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, compute->descriptorMap() );
 			heap->u( deviceObject->device(), 0, colorRGBX8Buffer->resource(), colorRGBX8Buffer->UAVDescription() );
 			heap->u( deviceObject->device(), 1, vertexBuffer->resource(), vertexBuffer->UAVDescription() );
 			heap->u( deviceObject->device(), 2, indexBuffer->resource(), indexBuffer->UAVDescription() );

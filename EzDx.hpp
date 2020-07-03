@@ -162,7 +162,7 @@ inline int64_t dispatchsize( int64_t n, int64_t threads )
 inline uint64_t alignPointer( uint64_t p, uint64_t alignment )
 {
 	uint64_t m = p % alignment;
-	if (m == 0) 
+	if ( m == 0 )
 	{
 		return p;
 	}
@@ -277,7 +277,7 @@ public:
 	}
 	void execute( CommandObject* commandObject )
 	{
-		ID3D12CommandList* const command[] = {commandObject->list()};
+		ID3D12CommandList* const command[] = { commandObject->list() };
 		_queue->ExecuteCommandLists( 1, command );
 	}
 	std::shared_ptr<FenceObject> fence( ID3D12Device* device )
@@ -305,33 +305,37 @@ public:
 
 		_deviceName = d.Description;
 
-		struct DeviceIID {
+		struct DeviceIID
+		{
 			IID iid;
 			const char* type;
 		};
-#define DEVICE_VER(type) { __uuidof(type), #type }
+#define DEVICE_VER( type )      \
+	{                           \
+		__uuidof( type ), #type \
+	}
 		const DeviceIID deviceIIDs[] = {
-			DEVICE_VER(ID3D12Device8),
-			DEVICE_VER(ID3D12Device7),
-			DEVICE_VER(ID3D12Device6),
-			DEVICE_VER(ID3D12Device5),
-			DEVICE_VER(ID3D12Device4),
-			DEVICE_VER(ID3D12Device3),
-			DEVICE_VER(ID3D12Device2),
-			DEVICE_VER(ID3D12Device1),
+			DEVICE_VER( ID3D12Device8 ),
+			DEVICE_VER( ID3D12Device7 ),
+			DEVICE_VER( ID3D12Device6 ),
+			DEVICE_VER( ID3D12Device5 ),
+			DEVICE_VER( ID3D12Device4 ),
+			DEVICE_VER( ID3D12Device3 ),
+			DEVICE_VER( ID3D12Device2 ),
+			DEVICE_VER( ID3D12Device1 ),
 		};
 #undef DEVICE_VER
 
-		for (auto deviceIID : deviceIIDs)
+		for ( auto deviceIID : deviceIIDs )
 		{
-			hr = D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, deviceIID.iid, (void**)_device.getAddressOf());
-			if (hr == S_OK)
+			hr = D3D12CreateDevice( adapter, D3D_FEATURE_LEVEL_12_0, deviceIID.iid, (void**)_device.getAddressOf() );
+			if ( hr == S_OK )
 			{
 				_deviceIIDType = deviceIID.type;
 				break;
 			}
 		}
-		DX_ASSERT(hr == S_OK, "");
+		DX_ASSERT( hr == S_OK, "" );
 
 		D3D12_FEATURE_DATA_SHADER_MODEL shaderModelFeature = {};
 		shaderModelFeature.HighestShaderModel = D3D_SHADER_MODEL_6_5;
@@ -340,13 +344,13 @@ public:
 
 		std::map<D3D_SHADER_MODEL, std::string> sm_to_s =
 			{
-				{D3D_SHADER_MODEL_5_1, "D3D_SHADER_MODEL_5_1"},
-				{D3D_SHADER_MODEL_6_0, "D3D_SHADER_MODEL_6_0"},
-				{D3D_SHADER_MODEL_6_1, "D3D_SHADER_MODEL_6_1"},
-				{D3D_SHADER_MODEL_6_2, "D3D_SHADER_MODEL_6_2"},
-				{D3D_SHADER_MODEL_6_3, "D3D_SHADER_MODEL_6_3"},
-				{D3D_SHADER_MODEL_6_4, "D3D_SHADER_MODEL_6_4"},
-				{D3D_SHADER_MODEL_6_5, "D3D_SHADER_MODEL_6_5"},
+				{ D3D_SHADER_MODEL_5_1, "D3D_SHADER_MODEL_5_1" },
+				{ D3D_SHADER_MODEL_6_0, "D3D_SHADER_MODEL_6_0" },
+				{ D3D_SHADER_MODEL_6_1, "D3D_SHADER_MODEL_6_1" },
+				{ D3D_SHADER_MODEL_6_2, "D3D_SHADER_MODEL_6_2" },
+				{ D3D_SHADER_MODEL_6_3, "D3D_SHADER_MODEL_6_3" },
+				{ D3D_SHADER_MODEL_6_4, "D3D_SHADER_MODEL_6_4" },
+				{ D3D_SHADER_MODEL_6_5, "D3D_SHADER_MODEL_6_5" },
 			};
 		_highestShaderModel = sm_to_s[shaderModelFeature.HighestShaderModel];
 
@@ -404,6 +408,7 @@ public:
 	{
 		return _totalLaneCount;
 	}
+
 private:
 	std::string _deviceIIDType;
 	std::wstring _deviceName;
@@ -427,8 +432,8 @@ class BatchHeapAllocator
 public:
 	void requestDefaultUAV( IResourceAcceptor* acceptor, uint64_t bytes, D3D12_RESOURCE_STATES initialState )
 	{
-		DX_ASSERT(_allocated == false, "");
-		
+		DX_ASSERT( _allocated == false, "" );
+
 		_bytesDefault = alignPointer( _bytesDefault, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT );
 
 		Allocation allocation = {};
@@ -437,20 +442,20 @@ public:
 		allocation.initialState = initialState;
 		allocation.resourceDesc = CD3DX12_RESOURCE_DESC::Buffer( bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS );
 		allocation.acceptor = acceptor;
-		_allocationDefault.push_back(allocation);
+		_allocationDefault.push_back( allocation );
 
 		_bytesDefault += bytes;
 	}
 	void allocate( ID3D12Device* device )
 	{
-		DX_ASSERT(_allocated == false, "");
+		DX_ASSERT( _allocated == false, "" );
 		_allocated = true;
 
 		HRESULT hr;
 		hr = device->CreateHeap( &CD3DX12_HEAP_DESC( _bytesDefault, D3D12_HEAP_TYPE_DEFAULT ), IID_PPV_ARGS( _heapDefault.getAddressOf() ) );
-		DX_ASSERT(hr == S_OK, "");
+		DX_ASSERT( hr == S_OK, "" );
 
-		for (int i = 0; i < _allocationDefault.size(); ++i)
+		for ( int i = 0; i < _allocationDefault.size(); ++i )
 		{
 			DxPtr<ID3D12Resource> resource;
 			hr = device->CreatePlacedResource(
@@ -459,9 +464,8 @@ public:
 				&_allocationDefault[i].resourceDesc,
 				_allocationDefault[i].initialState,
 				nullptr,
-				IID_PPV_ARGS(resource.getAddressOf())
-			);
-			DX_ASSERT(hr == S_OK, "");
+				IID_PPV_ARGS( resource.getAddressOf() ) );
+			DX_ASSERT( hr == S_OK, "" );
 			_allocationDefault[i].acceptor->accept( resource );
 			_resources.push_back( resource );
 		}
@@ -469,7 +473,7 @@ public:
 
 	void activateResources( ID3D12GraphicsCommandList* commandList )
 	{
-		DX_ASSERT(_allocated, "");
+		DX_ASSERT( _allocated, "" );
 		std::vector<D3D12_RESOURCE_BARRIER> barriers;
 		for ( auto r : _resources )
 		{
@@ -522,7 +526,7 @@ public:
 	void map( std::function<void( void* p )> f )
 	{
 		D3D12_RANGE readrange = {};
-		D3D12_RANGE writerange = {0, _bytes};
+		D3D12_RANGE writerange = { 0, _bytes };
 
 		void* p;
 		HRESULT hr;
@@ -575,7 +579,7 @@ public:
 
 	void map( std::function<void( const void* p )> f )
 	{
-		D3D12_RANGE readrange = {0, _bytes};
+		D3D12_RANGE readrange = { 0, _bytes };
 		D3D12_RANGE writerange = {};
 
 		void* p;
@@ -624,7 +628,7 @@ public:
 			IID_PPV_ARGS( _resource.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
 	}
-	BufferObjectUAV( BatchHeapAllocator *batchHeapAllocator, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState, bool hasCounter = false, D3D12_RESOURCE_STATES counterInitialState = D3D12_RESOURCE_STATE_COPY_DEST )
+	BufferObjectUAV( BatchHeapAllocator* batchHeapAllocator, int64_t bytes, int64_t structureByteStride, D3D12_RESOURCE_STATES initialState, bool hasCounter = false, D3D12_RESOURCE_STATES counterInitialState = D3D12_RESOURCE_STATE_COPY_DEST )
 		: _bytes( std::max( bytes, 1LL ) ), _structureByteStride( structureByteStride )
 	{
 		HRESULT hr;
@@ -693,7 +697,7 @@ public:
 		d.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
 		d.Buffer.FirstElement = 0;
 		d.Buffer.NumElements = 1;
-		d.Buffer.StructureByteStride = sizeof(uint32_t);
+		d.Buffer.StructureByteStride = sizeof( uint32_t );
 		d.Buffer.CounterOffsetInBytes = 0;
 		return d;
 	}
@@ -717,12 +721,12 @@ public:
 		DownloaderObject downloader( device, _bytes );
 
 		command.storeCommand( [&]( ID3D12GraphicsCommandList* commandList ) {
-			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE )} );
+			resourceBarrier( commandList, { CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE ) } );
 			commandList->CopyBufferRegion(
 				downloader.resource(), 0,
 				_resource.get(), 0,
 				_bytes );
-			resourceBarrier( commandList, {CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON )} );
+			resourceBarrier( commandList, { CD3DX12_RESOURCE_BARRIER::Transition( _resource.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON ) } );
 		} );
 		queue->execute( &command );
 
@@ -738,6 +742,7 @@ public:
 
 		return output;
 	}
+
 private:
 	int64_t _bytes;
 	int64_t _structureByteStride;
@@ -876,105 +881,215 @@ struct DescriptorEntity
 	int registerIndex = 0;
 	int descriptorHeapIndex = 0;
 };
+struct RootConstant32Entity
+{
+	int registerIndex = 0;
+	int constantCount = 0;
+	int constantIndex = 0;
+};
 
+struct DescriptorMap
+{
+	DescriptorMap()
+	{
+	}
+	// these are describe a descriptor heap representation.
+	// u and b will be encoded into a single descriptor heap. but s will be encoded the other descriptor heap. descriptorHeapIndex is the index.
+	void u( int iRegister )
+	{
+		DescriptorEntity entity;
+		entity.type = 'u';
+		entity.registerIndex = iRegister;
+		entity.descriptorHeapIndex = (int)_bufferDescriptorEntities.size();
+		_bufferDescriptorEntities.push_back( entity );
+	}
+	void uRange( int begIndexRegister, int endIndexRegister )
+	{
+		for ( int i = begIndexRegister; i < endIndexRegister; ++i )
+		{
+			u( i );
+		}
+	}
+	void b( int iRegister )
+	{
+		DescriptorEntity entity;
+		entity.type = 'b';
+		entity.registerIndex = iRegister;
+		entity.descriptorHeapIndex = (int)_bufferDescriptorEntities.size();
+		_bufferDescriptorEntities.push_back( entity );
+	}
+	void bRootConstant32( int iRegister, int constantCount )
+	{
+		RootConstant32Entity entity;
+		entity.registerIndex = iRegister;
+		entity.constantIndex = (int)_rootConstantEntities.size();
+		entity.constantCount = constantCount;
+		_rootConstantEntities.push_back( entity );
+	}
+
+	DxPtr<ID3D12RootSignature> createSignature( ID3D12Device* device ) const
+	{
+		std::vector<D3D12_DESCRIPTOR_RANGE> bufferDescriptorRanges;
+		for ( int i = 0; i < _bufferDescriptorEntities.size(); ++i )
+		{
+			DescriptorEntity entity = _bufferDescriptorEntities[i];
+
+			D3D12_DESCRIPTOR_RANGE range = {};
+			switch ( entity.type )
+			{
+			case 'u':
+				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+				break;
+			case 'b':
+				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+				break;
+			default:
+				DX_ASSERT( 0, "" );
+			}
+
+			range.NumDescriptors = 1;
+			range.BaseShaderRegister = entity.registerIndex;
+			range.RegisterSpace = 0;
+			range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+			bufferDescriptorRanges.push_back( range );
+		}
+		std::vector<D3D12_ROOT_PARAMETER> rootParameters;
+
+		{
+			D3D12_ROOT_PARAMETER rootParameter = {};
+			rootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+			rootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+			rootParameter.DescriptorTable.NumDescriptorRanges = _bufferDescriptorEntities.size();
+			rootParameter.DescriptorTable.pDescriptorRanges = bufferDescriptorRanges.data();
+			rootParameters.push_back(rootParameter);
+		}
+
+		// Constant root parameters are started from 1.
+		for ( int i = 0; i < _rootConstantEntities.size(); ++i )
+		{
+			RootConstant32Entity entity = _rootConstantEntities[i];
+			D3D12_ROOT_PARAMETER rootParameter = {};
+			rootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+			rootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+			rootParameter.Constants.RegisterSpace = 0;
+			rootParameter.Constants.ShaderRegister = entity.registerIndex;
+			rootParameter.Constants.Num32BitValues = entity.constantCount;
+			rootParameters.push_back( rootParameter );
+		}
+
+		// Signature
+		D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC( rootParameters.size(), rootParameters.data() );
+		DxPtr<ID3DBlob> pSignature;
+		HRESULT hr;
+		hr = D3D12SerializeRootSignature( &rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, pSignature.getAddressOf(), nullptr );
+		DX_ASSERT( hr == S_OK, "" );
+
+		DxPtr<ID3D12RootSignature> signature;
+		hr = device->CreateRootSignature( 0, pSignature->GetBufferPointer(), pSignature->GetBufferSize(), IID_PPV_ARGS( signature.getAddressOf() ) );
+		DX_ASSERT( hr == S_OK, "" );
+		return signature;
+	}
+
+	uint32_t bytesForBufferDescriptor( int incrementSizeCbvSrvUav ) const
+	{
+		int maxIndex = 0;
+		for ( DescriptorEntity e : _bufferDescriptorEntities )
+		{
+			maxIndex = std::max( maxIndex, e.descriptorHeapIndex );
+		}
+		return incrementSizeCbvSrvUav * ( maxIndex + 1 );
+	}
+
+	uint32_t addressOfBufferDescriptor( char type, int iRegister, ID3D12Device* device ) const
+	{
+		uint32_t incrementUAV = device->GetDescriptorHandleIncrementSize( D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV );
+		for ( DescriptorEntity e : _bufferDescriptorEntities )
+		{
+			if ( e.type == type && e.registerIndex == iRegister )
+			{
+				return incrementUAV * e.descriptorHeapIndex;
+			}
+		}
+		DX_ASSERT( false, "" );
+		return -1;
+	}
+	uint32_t rootParameterIndexOfConstant( int iRegister ) const
+	{
+		for ( RootConstant32Entity e : _rootConstantEntities )
+		{
+			if ( e.registerIndex == iRegister )
+			{
+				return e.constantIndex + 1 /* buffer descriptor heap */;
+			}
+		}
+		DX_ASSERT( false, "" );
+		return -1;
+	}
+	std::vector<DescriptorEntity> _bufferDescriptorEntities;
+	std::vector<RootConstant32Entity> _rootConstantEntities;
+};
+
+//
 class StackDescriptorHeapObject
 {
 public:
-	StackDescriptorHeapObject( ID3D12Device* device, int bufferHeapCapacity )
-		: _bufferHeapCapacity( bufferHeapCapacity )
+	StackDescriptorHeapObject( ID3D12Device* device, int bufferHeapMaxCount )
 	{
 		HRESULT hr;
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-		desc.NumDescriptors = _bufferHeapCapacity;
+		desc.NumDescriptors = bufferHeapMaxCount;
 		desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		hr = device->CreateDescriptorHeap( &desc, IID_PPV_ARGS( _bufferHeap.getAddressOf() ) );
 		DX_ASSERT( hr == S_OK, "" );
 
-		_incrementUAV = device->GetDescriptorHandleIncrementSize( D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV );
+		_incrementSizeCbvSrvUav = device->GetDescriptorHandleIncrementSize( D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV );
+		_bufferHeapCapacityBytes = bufferHeapMaxCount * _incrementSizeCbvSrvUav;
 	}
 	void clear()
 	{
-		_bufferHeapHead = 0;
-		_currentHeapCount = 0;
+		_bufferHeapHeadBytes = 0;
+		_currentBufferHeapBytes = 0;
 	}
-	void startNextHeapAndAssign( ID3D12GraphicsCommandList* commandList, std::vector<DescriptorEntity> bufferDescriptorEntries )
+	void startNextHeapAndAssign( ID3D12GraphicsCommandList* commandList, DescriptorMap descriptorMap )
 	{
-		_bufferHeapHead += _currentHeapCount;
-		_bufferDescriptorEntries = bufferDescriptorEntries;
+		_descriptorMap = descriptorMap;
+		_bufferHeapHeadBytes += _currentBufferHeapBytes;
+		_currentBufferHeapBytes = _descriptorMap.bytesForBufferDescriptor( _incrementSizeCbvSrvUav );
 
-		int maxIndex = 0;
-		for ( DescriptorEntity e : _bufferDescriptorEntries )
-		{
-			maxIndex = std::max( maxIndex, e.descriptorHeapIndex );
-		}
-		_currentHeapCount = maxIndex + 1;
-
-		DX_ASSERT( _bufferHeapHead + _currentHeapCount < _bufferHeapCapacity, "oveflow descriptor heap" );
+		DX_ASSERT( _bufferHeapHeadBytes + _currentBufferHeapBytes < _bufferHeapCapacityBytes, "oveflow descriptor heap" );
 
 		// Assign
-		ID3D12DescriptorHeap* const heaps[] = {_bufferHeap.get()};
+		ID3D12DescriptorHeap* const heaps[] = { _bufferHeap.get() };
 		commandList->SetDescriptorHeaps( 1, heaps );
-		commandList->SetComputeRootDescriptorTable( 0, add( _bufferHeap->GetGPUDescriptorHandleForHeapStart(), _incrementUAV * _bufferHeapHead ) );
-	}
-	void u( ID3D12Device* device, int i, ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC uavdescription, ID3D12Resource* counterResource = nullptr )
-	{
-		bool found = false;
-		for ( DescriptorEntity e : _bufferDescriptorEntries )
-		{
-			if ( e.type == 'u' && e.registerIndex == i )
-			{
-				found = true;
-				device->CreateUnorderedAccessView( resource, counterResource, &uavdescription, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
-				break;
-			}
-		}
-		DX_ASSERT( found, "" );
-	}
-	void b( ID3D12Device* device, int i, ID3D12Resource* resource )
-	{
-		bool found = false;
-		for ( DescriptorEntity e : _bufferDescriptorEntries )
-		{
-			if ( e.type == 'b' && e.registerIndex == i )
-			{
-				found = true;
-
-				D3D12_CONSTANT_BUFFER_VIEW_DESC d = {};
-				d.BufferLocation = resource->GetGPUVirtualAddress();
-				d.SizeInBytes = resource->GetDesc().Width;
-				device->CreateConstantBufferView( &d, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
-				break;
-			}
-		}
-		DX_ASSERT( found, "" );
-	}
-	void b( ID3D12Device* device, int i, ID3D12Resource* resource, uint64_t bytesStride, uint64_t byteOffset )
-	{
-		bool found = false;
-		for ( DescriptorEntity e : _bufferDescriptorEntries )
-		{
-			if ( e.type == 'b' && e.registerIndex == i )
-			{
-				found = true;
-
-				D3D12_CONSTANT_BUFFER_VIEW_DESC d = {};
-				d.BufferLocation = resource->GetGPUVirtualAddress() + byteOffset;
-				d.SizeInBytes = bytesStride;
-				device->CreateConstantBufferView( &d, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _incrementUAV * ( _bufferHeapHead + e.descriptorHeapIndex ) ) );
-				break;
-			}
-		}
-		DX_ASSERT( found, "" );
+		commandList->SetComputeRootDescriptorTable( 0, add( _bufferHeap->GetGPUDescriptorHandleForHeapStart(), _bufferHeapHeadBytes ) );
 	}
 
+	void u( ID3D12Device* device, int iRegister, ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC uavdescription, ID3D12Resource* counterResource = nullptr )
+	{
+		int address = _descriptorMap.addressOfBufferDescriptor( 'u', iRegister, device );
+		device->CreateUnorderedAccessView( resource, counterResource, &uavdescription, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _bufferHeapHeadBytes + address ) );
+	}
+	void b( ID3D12Device* device, int iRegister, ID3D12Resource* resource )
+	{
+		int address = _descriptorMap.addressOfBufferDescriptor( 'b', iRegister, device );
+		D3D12_CONSTANT_BUFFER_VIEW_DESC d = {};
+		d.BufferLocation = resource->GetGPUVirtualAddress();
+		d.SizeInBytes = resource->GetDesc().Width;
+		device->CreateConstantBufferView( &d, add( _bufferHeap->GetCPUDescriptorHandleForHeapStart(), _bufferHeapHeadBytes + address ) );
+	}
+	void bRootConstant32( ID3D12GraphicsCommandList* commandList, int iRegister, int num32BitValuesToSet, void *pSrc )
+	{
+		commandList->SetComputeRoot32BitConstants( _descriptorMap.rootParameterIndexOfConstant(iRegister), num32BitValuesToSet, pSrc, 0 );
+	}
 private:
-	int _incrementUAV = 0;
-	int _bufferHeapCapacity = 0;
-	int _bufferHeapHead = 0;
-	int _currentHeapCount = 0;
+	int _incrementSizeCbvSrvUav = 0;
+	int _bufferHeapCapacityBytes = 0;
+	int _bufferHeapHeadBytes = 0;
+	int _currentBufferHeapBytes = 0;
+
 	DxPtr<ID3D12DescriptorHeap> _bufferHeap;
-	std::vector<DescriptorEntity> _bufferDescriptorEntries;
+	DescriptorMap _descriptorMap;
 };
 
 class FileBlob
@@ -1013,81 +1128,43 @@ private:
 class ComputeObject
 {
 public:
-	void u( int i )
+	// these are describe a descriptor heap representation.
+	// u and b will be encoded into a single descriptor heap. but s will be encoded the other descriptor heap. descriptorHeapIndex is the index.
+	void u( int iRegister )
 	{
 		DX_ASSERT( !_signature, "" );
 		DX_ASSERT( !_pipelineState, "" );
-		DescriptorEntity entity;
-		entity.type = 'u';
-		entity.registerIndex = i;
-		entity.descriptorHeapIndex = (int)_bufferDescriptorEntries.size();
-		_bufferDescriptorEntries.push_back( entity );
+		_descriptorMap.u( iRegister );
 	}
-	void uRange( int begIndex, int endIndex)
+	void uRange( int begIndexRegister, int endIndexRegister )
 	{
-		for (int i = begIndex; i < endIndex; ++i)
-		{
-			u(i);
-		}
+		_descriptorMap.uRange( begIndexRegister, endIndexRegister );
 	}
-	void b( int i )
+	void b( int iRegister )
 	{
 		DX_ASSERT( !_signature, "" );
 		DX_ASSERT( !_pipelineState, "" );
-		DescriptorEntity entity;
-		entity.type = 'b';
-		entity.registerIndex = i;
-		entity.descriptorHeapIndex = (int)_bufferDescriptorEntries.size();
-		_bufferDescriptorEntries.push_back( entity );
+		_descriptorMap.b( iRegister );
+	}
+	void bRootConstant32( int iRegister, int constantCount )
+	{
+		DX_ASSERT( !_signature, "" );
+		DX_ASSERT( !_pipelineState, "" );
+		_descriptorMap.bRootConstant32( iRegister, constantCount );
 	}
 
+	// compile shader and build. it also create the root signature.
+	// you have to finish up calling u() b() before using this method.
 	void loadShaderAndBuild( ID3D12Device* device, const char* shaderFile, const wchar_t* name = L"" )
 	{
-		std::vector<D3D12_DESCRIPTOR_RANGE> bufferDescriptorRanges;
-		for ( int i = 0; i < _bufferDescriptorEntries.size(); ++i )
-		{
-			DescriptorEntity entity = _bufferDescriptorEntries[i];
-
-			D3D12_DESCRIPTOR_RANGE range = {};
-			switch ( entity.type )
-			{
-			case 'u':
-				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-				break;
-			case 'b':
-				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-				break;
-			default:
-				DX_ASSERT( 0, "" );
-			}
-
-			range.NumDescriptors = 1;
-			range.BaseShaderRegister = entity.registerIndex;
-			range.RegisterSpace = 0;
-			range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-			bufferDescriptorRanges.push_back( range );
-		}
-		D3D12_ROOT_PARAMETER rootParameter = {};
-		rootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		rootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-		rootParameter.DescriptorTable.NumDescriptorRanges = _bufferDescriptorEntries.size();
-		rootParameter.DescriptorTable.pDescriptorRanges = bufferDescriptorRanges.data();
-
-		// Signature
-		D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC( 1, &rootParameter );
-		DxPtr<ID3DBlob> pSignature;
 		HRESULT hr;
-		hr = D3D12SerializeRootSignature( &rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, pSignature.getAddressOf(), nullptr );
-		DX_ASSERT( hr == S_OK, "" );
 
-		_signature = DxPtr<ID3D12RootSignature>();
-		hr = device->CreateRootSignature( 0, pSignature->GetBufferPointer(), pSignature->GetBufferSize(), IID_PPV_ARGS( _signature.getAddressOf() ) );
-		DX_ASSERT( hr == S_OK, "" );
+		_signature = _descriptorMap.createSignature( device );
 
 		FileBlob shaderblob( shaderFile );
 		// DxPtr<ID3DBlob> cso;
 		// hr = D3DReadFileToBlob( shaderFile.c_str(), cso.getAddressOf() );
-		DX_ASSERT( hr == S_OK, "" );
+		// DX_ASSERT( hr == S_OK, "" );
 		{
 			D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
 			desc.CS.pShaderBytecode = shaderblob.data();
@@ -1102,9 +1179,10 @@ public:
 			_pipelineState->SetName( name );
 		}
 	}
-	std::vector<DescriptorEntity> descriptorEnties() const
+
+	DescriptorMap descriptorMap() const
 	{
-		return _bufferDescriptorEntries;
+		return _descriptorMap;
 	}
 
 	void setPipelineState( ID3D12GraphicsCommandList* commandList )
@@ -1122,7 +1200,7 @@ public:
 	}
 
 private:
-	std::vector<DescriptorEntity> _bufferDescriptorEntries;
+	DescriptorMap _descriptorMap;
 
 	DxPtr<ID3D12RootSignature> _signature;
 	DxPtr<ID3D12PipelineState> _pipelineState;

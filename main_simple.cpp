@@ -109,7 +109,7 @@ void run( DeviceObject* deviceObject )
 		// Execute
 		compute->setPipelineState( commandList );
 		compute->setComputeRootSignature( commandList );
-		heap->startNextHeapAndAssign( commandList, compute->descriptorEnties() );
+		heap->startNextHeapAndAssign( commandList, compute->descriptorMap() );
 		heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 		heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
 		compute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );

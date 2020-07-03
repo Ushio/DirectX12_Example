@@ -155,8 +155,6 @@ bool slabs(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float knownT, ou
 [numthreads(NUM_THREAD, 1, 1)]
 void main( uint3 gID : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
 {
-	int sharedBaseIndex = WaveGetLaneCount() * (localID.x / WaveGetLaneCount()) * 3;
-
 	int x = gID.x % cb_width;
 	int y = gID.x / cb_width;
 

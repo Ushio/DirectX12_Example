@@ -40,7 +40,7 @@ void run( DeviceObject* deviceObject )
 	std::shared_ptr<CommandObject> computeCommandList( new CommandObject( deviceObject->device(), D3D12_COMMAND_LIST_TYPE_DIRECT ) );
 	computeCommandList->setName( L"Compute" );
 
-	std::vector<uint32_t> input( 1000000 );
+	std::vector<uint32_t> input( 10000000 );
 	for ( int i = 0; i < input.size(); ++i )
 	{
 		input[i] = rand();
@@ -167,7 +167,7 @@ void run( DeviceObject* deviceObject )
 				// count
 				countCompute->setPipelineState( commandList );
 				countCompute->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, countCompute->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, countCompute->descriptorMap() );
 				heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
 				heap->u( deviceObject->device(), 1, counter->resource(), counter->UAVDescription() );
 				heap->b( deviceObject->device(), 0, countAndReorderArguments[i]->resource() );
@@ -184,7 +184,7 @@ void run( DeviceObject* deviceObject )
 				// Scan Prepare
 				scanPrepareCompute->setPipelineState( commandList );
 				scanPrepareCompute->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, scanPrepareCompute->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, scanPrepareCompute->descriptorMap() );
 				heap->u( deviceObject->device(), 0, counter->resource(), counter->UAVDescription() );
 				heap->u( deviceObject->device(), 1, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
 				scanPrepareCompute->dispatch( commandList, dispatchsize( numberOfAllCoutner, 128 ), 1, 1 );
@@ -198,7 +198,7 @@ void run( DeviceObject* deviceObject )
 
 					scanglobalCompute->setPipelineState( commandList );
 					scanglobalCompute->setComputeRootSignature( commandList );
-					heap->startNextHeapAndAssign( commandList, scanglobalCompute->descriptorEnties() );
+					heap->startNextHeapAndAssign( commandList, scanglobalCompute->descriptorMap() );
 					heap->b( deviceObject->device(), 0, scanglobalConstants[j]->resource() );
 					heap->u( deviceObject->device(), 0, globalScanTable0->resource(), globalScanTable0->UAVDescription() );
 					heap->u( deviceObject->device(), 1, globalScanTable1->resource(), globalScanTable1->UAVDescription() );
@@ -219,7 +219,7 @@ void run( DeviceObject* deviceObject )
 
 				reorderCompute->setPipelineState( commandList );
 				reorderCompute->setComputeRootSignature( commandList );
-				heap->startNextHeapAndAssign( commandList, reorderCompute->descriptorEnties() );
+				heap->startNextHeapAndAssign( commandList, reorderCompute->descriptorMap() );
 				heap->u( deviceObject->device(), 0, xs0->resource(), xs0->UAVDescription() );
 				heap->u( deviceObject->device(), 1, xs1->resource(), xs1->UAVDescription() );
 				heap->u( deviceObject->device(), 2, globalScanTable0->resource(), globalScanTable0->UAVDescription() );

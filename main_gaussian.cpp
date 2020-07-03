@@ -121,7 +121,7 @@ void run( DeviceObject* deviceObject )
 			// Degamma
 			degammaCompute->setPipelineState( commandList );
 			degammaCompute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, degammaCompute->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, degammaCompute->descriptorMap() );
 			heap->u( deviceObject->device(), 0, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
 			heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 
@@ -138,7 +138,7 @@ void run( DeviceObject* deviceObject )
 			gaussianCompute->setComputeRootSignature( commandList );
 
 			// Horizontal
-			heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorMap() );
 			heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 			heap->u( deviceObject->device(), 1, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
 			heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
@@ -151,7 +151,7 @@ void run( DeviceObject* deviceObject )
 			stumper->stamp( commandList, "gaussian V" );
 
 			// Vertical
-			heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, gaussianCompute->descriptorMap() );
 			heap->u( deviceObject->device(), 0, valueBuffer1->resource(), valueBuffer1->UAVDescription() );
 			heap->u( deviceObject->device(), 1, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 			heap->u( deviceObject->device(), 2, kernel->resource(), kernel->UAVDescription() );
@@ -168,7 +168,7 @@ void run( DeviceObject* deviceObject )
 			// Gamma
 			gammaCompute->setPipelineState( commandList );
 			gammaCompute->setComputeRootSignature( commandList );
-			heap->startNextHeapAndAssign( commandList, gammaCompute->descriptorEnties() );
+			heap->startNextHeapAndAssign( commandList, gammaCompute->descriptorMap() );
 			heap->u( deviceObject->device(), 0, valueBuffer0->resource(), valueBuffer0->UAVDescription() );
 			heap->u( deviceObject->device(), 1, ioImageBuffer->resource(), ioImageBuffer->UAVDescription() );
 			gammaCompute->dispatch( commandList, dispatchsize( numberOfElement, 64 ), 1, 1 );
